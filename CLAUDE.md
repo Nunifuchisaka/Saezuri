@@ -1,0 +1,77 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 概要
+
+saezuriは、X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。公式X APIは有料のため採用せず、Playwrightのブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。
+
+台本・記事本体への取捨選択・執筆は本ツールの範囲外（vrchat-video-script／note-vrchat-guideスキル側の担当）。
+
+## 環境構築・実行コマンド
+
+```
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+playwright install chromium   # config.yamlのbrowserでfirefox/webkitを使う場合は該当エンジンも install
+```
+
+全コマンドはプロジェクトルートから実行する（`config.yaml`等を相対パスで参照するため）。
+
+```
+python scripts/login.py                                          # 初回・失効時の手動ログイン
+python scripts/search.py --query "VRChat アップデート" --max 100  # キーワード検索
+python scripts/user_tweets.py                                     # watch_accounts全件の投稿追跡
+python scripts/trends.py                                          # トレンド取得
+python scripts/bookmarks.py                                       # サブ垢自身のブックマーク取得
+python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Markdownダイジェスト生成
+```
+
+自動テストは存在しない。単体で動作確認する場合はモジュールを直接importして関数を呼ぶ（例: `digest.py`のパース・整形系関数はPlaywright非依存で単体実行できる）。
+
+## 運用上の制約（コード変更時に踏まえること）
+
+- **オンデマンド実行専用**：cron・タスクスケジューラ等の定期実行を導入するコードは書かない（利用規約抵触・BAN回避のための設計方針）。
+- **自動ログイン厳禁**：ID/PWの自動入力ロジックは追加しない。`login.py`は毎回人間の手動ログインを待つ設計を維持する。
+- **エラー時は自動リトライ・自動突破をしない**：レートリミット（429）・チャレンジ画面（CAPTCHA）検知時は即座に処理を中断し、検知時点までの収集済みデータを保存してから終了する。自動リトライループや自動突破コードは追加しない。
+
+## アーキテクチャ
+
+### 共通基盤（`scripts/`直下、収集モジュールからimportされる）
+
+- **`session.py`**：`config.yaml`の読み込み、ブラウザ起動（chromium/firefox/webkit/brave対応。braveはchromiumエンジン+`executable_path`指定で起動）、`storage_state`（手動ログイン結果）を使った`BrowserContext`生成、`verify_login`/`require_login`によるログイン状態検証（失効時`SessionExpiredError`）。
+- **`storage.py`**：JSONLの追記・読み込み、`state/seen_ids.json`（グローバル既読ID）、`state/<account>_last_id.json`（アカウント別前回取得ID）の読み書きと差分判定（`filter_unseen`）。
+- **`schema.py`**：`Post`／`TrendEntry`のdataclass定義。`to_dict()`/`from_dict()`でJSONLとの相互変換を行う（項目順・欠損キーの扱いはここに集約）。
+- **`capture.py`**：収集処理の中核。
+  - `GraphQLCapture`：`page.on("response")`で対象オペレーション（`SearchTimeline`/`UserTweets`/`UserTweetsAndReplies`/`Bookmarks`、トレンド系は`ExplorePage`等を部分一致）のレスポンスを保持し、`drain()`時に初めて`response.json()`を読む（ハンドラ内での同期読み出しによる取りこぼし・デッドロックを避けるため）。
+  - `parse_timeline_payload`/`parse_trends_payload`：GraphQLペイロードから`Post`/`TrendEntry`へ正規化。X側のレスポンス構造は非公開・無予告変更されるため、キー名を決め打ちせず「`instructions`という名のlistを再帰探索する」等の耐性を持たせている。想定キー欠如時は例外を投げず`logger.warning()`でそのエントリだけスキップし、全体は落とさない設計を踏襲すること。
+  - `scroll_and_collect`：スクロール→`drain()`→ランダム待機（`config.yaml`の`wait_seconds`）を、上限件数到達または新規アイテムなしが規定回数（既定3回）続くまで繰り返す。429検知で`RateLimitedError`、チャレンジ画面遷移で`ChallengeDetectedError`を送出。
+
+### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
+
+各スクリプトは同一パターンで構成される：
+1. `load_config` → `launch_browser`（`--headed`未指定ならheadless）→ `new_context`（`storage_state`ロード。未ログインなら`FileNotFoundError`）
+2. `require_login`でセッション検証（失効なら`SessionExpiredError`）
+3. `GraphQLCapture`を対象オペレーションで生成・`attach`
+4. `scroll_and_collect`で収集ループを回す（parse関数内で外側の`buffer`にも溜めておき、例外中断時も収集済み分を保存できるようにする、というパターンを踏襲すること）
+5. 収集結果を`storage`経由でJSONL保存・既読/差分状態を更新
+6. 終了コードは共通契約：`0`=正常 / `1`=設定・環境エラー / `2`=セッション失効 / `3`=レートリミット検知 / `4`=チャレンジ画面検知（3・4でも検知時点までの収集分は保存してから終了する）
+
+保存先・差分管理の違い：
+- `search.py`：実行ごとに新規ファイル`data/raw/search_<日付>_<連番3桁>.jsonl`。既読IDは`state/seen_ids.json`でグローバル管理。
+- `user_tweets.py`：`data/raw/user_tweets_<日付>.jsonl`に追記。ハンドルごとに`state/<handle>_last_id.json`で差分管理。
+- `trends.py`：`data/raw/trends_<日付>.jsonl`に追記。`interest_keywords`によるフィルタが既定でON（`--no-filter`で解除）。
+- `bookmarks.py`：`data/raw/bookmarks_<日付>.jsonl`に追記。`state/bookmarks_last_id.json`で差分管理。ログイン中のサブ垢自身のブックマークしか取得できない制約あり（ID大小比較での差分判定のため、古い投稿を後からブックマークすると取得漏れが起こりうる。既知の制約としてREADME参照）。
+
+### `digest.py`（収集系と非依存）
+
+`data/raw/*.jsonl`を読み込みMarkdownダイジェストを生成する唯一の非Playwright依存モジュール。Xへの実アクセスは一切行わない。各行を`trend_word`キーの有無／`id`+`author_handle`キーの有無で`Post`/`TrendEntry`に判別する（`classify_record`）。エンゲージメント合計（like+repost+reply+quote）順の「注目ポスト」セクションは著作権配慮のため本文要約（先頭100文字）+出典URLのみで全文転載はしない設計を維持すること。
+
+## 設定ファイル（`config.yaml`）
+
+`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`、`session.storage_state_path`、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
+
+## 配置・Git管理について
+
+配置場所未定のスタンドアロン構成で、相対パス完結・外部依存最小に作られている（将来の移動を想定）。`.gitignore`はセッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙（`*.jsonl`、`state/`、`digest/`等）で除外しており、将来の移動先でも同名パターンでそのまま機能する。
