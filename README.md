@@ -1,0 +1,265 @@
+# saezuri
+
+X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。
+
+## 目次
+
+- [概要](#概要)
+- [利用規約リスクについて（必読）](#利用規約リスクについて必読)
+- [収集専用サブアカウントについて](#収集専用サブアカウントについて)
+- [セットアップ](#セットアップ)
+- [使い方](#使い方)
+  - [login.py（初回ログイン）](#loginpy初回ログイン)
+  - [search.py（キーワード／ハッシュタグ検索）](#searchpyキーワードハッシュタグ検索)
+  - [user_tweets.py（特定アカウント投稿追跡）](#user_tweetspy特定アカウント投稿追跡)
+  - [trends.py（トレンド把握）](#trendspyトレンド把握)
+  - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
+  - [digest.py（Markdownダイジェスト生成）](#digestpymarkdownダイジェスト生成)
+- [設定ファイル（config.yaml）](#設定ファイルconfigyaml)
+- [出力ファイルについて](#出力ファイルについて)
+- [トラブルシューティング](#トラブルシューティング)
+- [既知の制約](#既知の制約)
+- [運用上の注意](#運用上の注意)
+- [配置場所・Git管理について](#配置場所git管理について)
+
+## 概要
+
+saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X上のキーワード検索・特定アカウント投稿・トレンド・ブックマークを収集するためのツール。
+
+公式X APIは有料のため採用せず、Playwrightによるブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。取得したデータはJSONLとして保存し、`digest.py`でMarkdownダイジェストに整形する。台本・記事本体への取捨選択・執筆は本ツールの範囲外で、既存のvrchat-video-script／note-vrchat-guideスキル側でClaudeが行う想定。
+
+## 利用規約リスクについて（必読）
+
+本ツールはスクレイピングでXの内部APIにアクセスするため、**X利用規約への抵触・アカウント凍結（BAN）が最大のリスク**である。以下の緩和策を必ず守って運用すること。
+
+- **オンデマンド実行のみ**：cron・タスクスケジューラ等による定期実行は行わない。台本・記事執筆の直前に手動で実行する。
+- **収集専用サブアカウントを使用**：本垢は使わない（詳細は次項）。
+- **自動ログインはしない**：ID/PWの自動入力は行わず、`login.py`で毎回人間が手動ログインする。
+- **低頻度アクセス**：多くても1日1〜数回程度にとどめ、連続実行は避ける（詳細は[運用上の注意](#運用上の注意)を参照）。
+
+これらを守っても凍結リスクをゼロにはできない。自己責任で利用すること。
+
+## 収集専用サブアカウントについて
+
+本垢ではなく、**収集専用に新規作成したサブアカウント**でログインして使うこと。本垢を使うと凍結時の被害が大きいため。
+
+ただし収集専用サブ垢を使う場合、`bookmarks.py`で取得できるのは**ログイン中のサブ垢自身がブックマークしたもの**に限られる。本垢が実際にブックマークした投稿は取得できない（Xの仕様上、他アカウントのブックマークは参照不可のため）。ブックマーク収集を使う場合は、サブ垢側でも同じ投稿をブックマークし直す運用が必要になる。
+
+## セットアップ
+
+初回のみ、以下の手順で環境を作る（コマンドはすべてプロジェクトルートで実行）。
+
+1. Python 3.11の仮想環境を作成する
+   ```
+   py -3.11 -m venv .venv
+   ```
+2. 仮想環境を有効化する（PowerShellの場合）
+   ```
+   .venv\Scripts\Activate.ps1
+   ```
+3. 依存パッケージをインストールする
+   ```
+   pip install -r requirements.txt
+   ```
+4. Playwright用のChromiumをインストールする
+   ```
+   playwright install chromium
+   ```
+   `config.yaml`の`browser`で`firefox`／`webkit`を使う場合は、それぞれ`playwright install firefox` / `playwright install webkit`も実行する。`brave`を使う場合、追加インストールは不要（Chromiumエンジンをそのまま使うため）だが、事前にBraveブラウザ本体をインストールしておくこと。
+5. `config.yaml`を編集する（`watch_accounts`＝追跡したいXハンドル、`interest_keywords`＝トレンド絞り込み・タグ付けに使う関心キーワード、取得上限・待機秒・出力先パス、起動するブラウザエンジン（`browser`）など。詳細は[設定ファイル](#設定ファイルconfigyaml)を参照）
+6. 手動ログインを実行する
+   ```
+   python scripts/login.py
+   ```
+   ブラウザが起動するので、そこでサブ垢に手動でログインする（最大5分待機）。ログインを検知すると`session/x_storage_state.json`にセッションが保存され、ブラウザが自動で閉じる。以降の収集コマンドはこのセッションを再利用する。
+
+## 使い方
+
+各コマンドはプロジェクトルートから実行する（`config.yaml`等を相対パスで参照するため）。共通の終了コードは以下の通り。
+
+| 終了コード | 意味 |
+|---|---|
+| 0 | 正常終了 |
+| 1 | 設定・環境エラー（`config.yaml`不備、`login.py`未実行等） |
+| 2 | セッション失効（`login.py`を再実行して手動ログインし直す） |
+| 3 | レートリミット（429）検知 |
+| 4 | チャレンジ画面（CAPTCHA等）検知 |
+
+終了コード3・4の場合も、検知時点までに収集済みの分はJSONLへ保存してから終了する。
+
+### login.py（初回ログイン）
+
+```
+python scripts/login.py
+```
+
+| オプション | 説明 |
+|---|---|
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
+
+`headless=False`で指定ブラウザ（既定: `config.yaml`の`browser`、既定値`chromium`）を起動し、ユーザーが手動でサブ垢にログインするのを待つ（最大5分）。`x.com/home`への遷移を検知したら`storage_state`（Cookie＋localStorage）を`config.yaml`の`session.storage_state_path`（既定: `session/x_storage_state.json`）へ保存する。ID/PWの自動入力は行わない。
+
+**注意**：`login.py`と収集スクリプト（`search.py`等）で異なるブラウザエンジンを使うと、`storage_state`を保存したエンジンと読み込むエンジンでフィンガープリントが変わりbot検知リスクが上がるため、同じ`--browser`（またはconfig.yamlの`browser`）を使うこと。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要。
+
+### search.py（キーワード／ハッシュタグ検索）
+
+`x.com/search?q=<クエリ>&f=live|top`を開き、`SearchTimeline`オペレーションのレスポンスを傍受する。
+
+```
+python scripts/search.py --query "VRChat アップデート" --mode live --max 100
+python scripts/search.py --query "#VRChat" --since-days 7
+```
+
+| オプション | 説明 |
+|---|---|
+| `--query`（必須） | 検索クエリ（ハッシュタグ・検索演算子も可） |
+| `--mode` | `live`（最新）／`top`（話題）。既定: `live` |
+| `--since-days N` | N日前以降に絞る（クエリに`since:YYYY-MM-DD`を付加） |
+| `--max` | 取得上限件数（省略時は`config.yaml`の`max_items`） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
+| `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+
+結果は実行ごとに`data/raw/search_<日付>_<連番3桁>.jsonl`という新規ファイルに保存する（同日に複数回実行してもキーワードごとにファイルが分離され、連番はその日の実行回数でカウントする）。既読IDは`state/seen_ids.json`でグローバル管理する（同一IDは再保存しない）。
+
+### user_tweets.py（特定アカウント投稿追跡）
+
+`config.yaml`の`watch_accounts`に列挙したハンドルそれぞれについて`x.com/<handle>`を開き、`UserTweets`（`--include-replies`指定時は`UserTweetsAndReplies`）を傍受する。
+
+```
+python scripts/user_tweets.py                     # watch_accounts全件
+python scripts/user_tweets.py --handle some_user   # 特定の1アカウントのみ
+python scripts/user_tweets.py --include-replies
+```
+
+| オプション | 説明 |
+|---|---|
+| `--handle` | 特定の1アカウントだけ実行（`@`は不要。省略時は`watch_accounts`全件） |
+| `--include-replies` | 返信も含めて収集する（`UserTweetsAndReplies`を傍受） |
+| `--max` | 1アカウントあたりの取得上限件数（省略時は`config.yaml`の`max_items`） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
+| `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+
+結果は`data/raw/user_tweets_<日付>.jsonl`に追記する。ハンドルごとに`state/<handle>_last_id.json`へ前回取得済み最新IDを保存し、それより新しいIDの投稿のみを差分保存する。レートリミット・チャレンジ検知時はその時点までの収集分を保存し、残りのアカウントは処理しない。
+
+### trends.py（トレンド把握）
+
+`x.com/explore/tabs/for-you`を開き、トレンド系オペレーション（`ExplorePage`等、名称の変動を考慮し緩めにキーワード判定）を傍受する。
+
+```
+python scripts/trends.py               # interest_keywordsで絞り込み(既定)
+python scripts/trends.py --no-filter   # 全件
+```
+
+| オプション | 説明 |
+|---|---|
+| `--filter` / `--no-filter` | `config.yaml`の`interest_keywords`を含むトレンドだけに絞る。既定: `--filter`（ON） |
+| `--max` | 取得上限件数（省略時は`config.yaml`の`max_items`） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
+| `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+
+結果は`data/raw/trends_<日付>.jsonl`に追記する。`interest_keywords`が空の場合は絞り込みをせず全件保存する（警告メッセージを表示）。
+
+### bookmarks.py（サブ垢自身のブックマーク収集）
+
+`x.com/i/bookmarks`を開き、`Bookmarks`オペレーションを傍受する。**取得できるのはログイン中のサブ垢自身がブックマークしたものに限る**（本垢のブックマークは対象外。[収集専用サブアカウントについて](#収集専用サブアカウントについて)を参照）。
+
+```
+python scripts/bookmarks.py
+```
+
+| オプション | 説明 |
+|---|---|
+| `--max` | 取得上限件数（省略時は`config.yaml`の`max_items`） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
+| `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+
+結果は`data/raw/bookmarks_<日付>.jsonl`に追記する。`state/bookmarks_last_id.json`へ前回取得済み最新IDを保存し、差分取得する（差分判定の制約は[既知の制約](#既知の制約)を参照）。
+
+### digest.py（Markdownダイジェスト生成）
+
+`data/raw/*.jsonl`を読み込み、人が読むためのMarkdownダイジェストを生成する。Xへの実アクセスは行わない（JSONL読み込みと文字列整形のみ）。
+
+```
+python scripts/digest.py data/raw/search_20260718_001.jsonl --title "VRChat アップデート"
+python scripts/digest.py data/raw/*.jsonl --output digest/my_digest.md
+```
+
+| オプション | 説明 |
+|---|---|
+| `inputs`（必須・可変長） | 入力JSONLファイルパス（複数指定可、globパターン可） |
+| `--output` | 出力Markdownファイルパス（省略時は`config.yaml`の`output.digest_dir`配下に日時付きファイル名で自動生成） |
+| `--title` | frontmatterの`source`やドキュメント見出しに使う説明（例: 検索クエリ名） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+
+入力の各行は`trend_word`キーの有無でトレンド、`id`＋`author_handle`キーの有無でポストと判定するため、種別の異なるJSONLを混在させて渡すこともできる。終了コードは`0`＝正常、`1`＝入力ファイルが見つからない、のいずれか。
+
+## 設定ファイル（config.yaml）
+
+| キー | 内容 |
+|---|---|
+| `watch_accounts` | `user_tweets.py`が追跡対象にするXハンドルのリスト（`@`は付けない） |
+| `interest_keywords` | トレンド絞り込み・ダイジェストのtagsに使う関心キーワードのリスト |
+| `max_items` | 1回の収集ジョブで取得する最大件数の目安（各コマンドの`--max`未指定時に使用） |
+| `wait_seconds.min` / `wait_seconds.max` | スクロール間のランダム待機秒数の範囲（機械的な連続アクセスを避けるため） |
+| `output.raw_dir` | 生データ（JSONL）の出力先ディレクトリ（既定: `data/raw`） |
+| `output.state_dir` | 既読ID・差分管理ファイルの出力先ディレクトリ（既定: `state`） |
+| `output.digest_dir` | `digest.py`が生成するMarkdownダイジェストの出力先ディレクトリ（既定: `digest`） |
+| `session.storage_state_path` | 手動ログイン結果（`storage_state`）の保存先（既定: `session/x_storage_state.json`） |
+| `browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `chromium`。不正値は`chromium`にフォールバックし警告を表示） |
+| `browser_executable_path` | `brave`使用時のみ必要。Brave実行ファイルの絶対パス。空／未指定なら一般的なインストール場所を自動探索する |
+
+いずれもプロジェクトルートからの相対パスで指定する（`browser_executable_path`は絶対パス）。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要（[セットアップ](#セットアップ)参照）。`brave`使用時、自動検出（`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`等の一般的なインストール場所を順に確認）に失敗する場合は`browser_executable_path`に絶対パスを指定すること。
+
+## 出力ファイルについて
+
+**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`）は以下の共通スキーマ。
+
+```
+id, url, author_handle, author_name, created_at, text, lang,
+like_count, repost_count, reply_count, quote_count,
+media(type/url配列), is_repost, quoted_id, source_query, collected_at
+```
+
+トレンド（`trends.py`）は別スキーマ。
+
+```
+trend_word, tweet_volume, rank, collected_at
+```
+
+**既読・差分管理（`state/`）**
+
+- `state/seen_ids.json`：`search.py`が使うグローバルな既読ID一覧
+- `state/<handle>_last_id.json`：`user_tweets.py`がハンドルごとに保存する前回取得済み最新ID
+- `state/bookmarks_last_id.json`：`bookmarks.py`が保存する前回取得済み最新ID
+
+**ダイジェスト（`digest.py`の出力Markdown）**：frontmatter（`type: reference`、`tags`、`source`＝検索条件やURL、`created`）に続き、`## 収集条件`（クエリ・期間・件数・収集日時）、`## 注目ポスト`（エンゲージメント合計順に本文要約100文字＋出典URL。著作権配慮のため全文転載はしない）、`## トレンド語`（言及数・rank）、生データJSONLへの相対パスリンク、という構成。
+
+## トラブルシューティング
+
+- **取得0件が続く**：Xの内部API構造変更が疑われる。コンソールの警告ログ（`instructionsが見つかりません(API構造変更の可能性)`等）を確認する。パーサーはベストエフォート実装のため、構造変更時は例外を投げず警告してスキップする設計になっている。
+- **終了コード3（429／レートリミット検知）**：クールダウンして時間を置いてから再実行する。すぐに再実行しない。
+- **終了コード2（セッション失効）**：`セッションが失効しています。login.pyを再実行して手動ログインし直してください。`と表示される。`python scripts/login.py`を再実行して手動ログインし直す。自動再ログインは行わない。
+- **終了コード4（CAPTCHA／チャレンジ画面検知）**：自動突破は試みない設計。表示されたメッセージに従い、`--headed`オプションを付けて実行し直すなどしてブラウザで手動対応する。
+
+## 既知の制約
+
+- **本垢のブックマークは取得不可**：`bookmarks.py`はログイン中のサブ垢自身がブックマークしたものしか取得できない。
+- **X内部API構造変更によるパーサー崩壊の可能性**：GraphQLのオペレーション名・レスポンス構造は非公開かつ予告なく変わる。キー名を決め打ちしない探索や警告スキップである程度耐性を持たせているが、大きな構造変更があれば追従できなくなる可能性がある。
+- **ブックマーク差分取得の抜け漏れ**：`bookmarks.py`の差分判定は投稿IDの大小比較で行っている。ブックマーク一覧はブックマークした順に並ぶため、IDの小さい（＝古い）投稿を後からブックマークした場合、前回取得済み最新IDより小さいと判定されて新規として拾われず、取得漏れが発生しうる。
+
+## 運用上の注意
+
+- 実行は**オンデマンドのみ**。定期実行（cron・タスクスケジューラ等）は設けない。
+- 台本・記事執筆の直前に手動で実行する運用とし、**多くても1日1〜数回**にとどめる。
+- 連続実行は避ける。
+
+## 配置場所・Git管理について
+
+本プログラムは配置場所未定のスタンドアロン構成であり、相対パス完結・外部依存最小で作られている。将来、現在の場所とは別のディレクトリに移動されることを想定している。
+
+`.gitignore`では`x_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する。

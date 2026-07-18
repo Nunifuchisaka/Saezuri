@@ -1,0 +1,39 @@
+# saezuri 設定ファイル
+
+# 監視対象アカウント（追跡対象のXハンドル名、@は付けない）
+# 例: watch_accounts: ["some_account", "another_account"]
+watch_accounts: ["claudeai","ClaudeDevs","OpenAI","OpenAIDevs","thsottiaux"]
+
+# 関心キーワード（トレンド収集時のフィルタや台本・記事ネタ探しの目印として使う語）
+# 例: interest_keywords: ["VRChat", "VR"]
+interest_keywords: ["Claude","Codex","OpenAI","LLM","GPT","バイブコーディング"]
+
+# 1回の収集ジョブで取得する最大件数の目安
+max_items: 100
+
+# スクロール間の待機秒数（ランダムでこの範囲から選び、機械的な連続アクセスを避ける）
+wait_seconds:
+  min: 3
+  max: 15
+
+# 各種出力先パス（すべてプロジェクトルートからの相対パス）
+output:
+  raw_dir: data/raw     # 生データ（JSONL）の出力先ディレクトリ
+  state_dir: state      # 既読ID・差分管理ファイルの出力先ディレクトリ
+  digest_dir: digest    # digest.py が生成するMarkdownダイジェストの出力先ディレクトリ
+
+# セッション関連
+session:
+  storage_state_path: session/x_storage_state.json  # 手動ログイン結果（storage_state）の保存先
+
+# 起動するブラウザエンジン(chromium/firefox/webkit/brave)。不正値・省略時はchromiumにフォールバックする。
+# firefox/webkitを使う場合は事前に `playwright install firefox` / `playwright install webkit` が必要。
+# login.pyと収集スクリプト(search.py等)で異なるエンジンを使うとフィンガープリントが変わり
+# bot検知リスクが上がるため、同じ値を使うこと。
+browser: brave # chromium
+
+# Brave使用時のみ必要。Brave実行ファイルの絶対パス。
+# 空/未指定なら一般的なインストール場所(下記例など)を自動探索する。
+# 他の環境に持って行く場合や自動検出に失敗する場合はここに絶対パスを指定する。
+# 例: browser_executable_path: C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe
+browser_executable_path:
