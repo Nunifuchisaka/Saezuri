@@ -15,6 +15,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [trends.py（トレンド把握）](#trendspyトレンド把握)
   - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
   - [digest.py（Markdownダイジェスト生成）](#digestpymarkdownダイジェスト生成)
+  - [media.py（収集済みJSONLからの画像ダウンロード）](#mediapy収集済みjsonlからの画像ダウンロード)
 - [設定ファイル（config.yaml）](#設定ファイルconfigyaml)
 - [出力ファイルについて](#出力ファイルについて)
 - [トラブルシューティング](#トラブルシューティング)
@@ -198,6 +199,31 @@ python scripts/digest.py data/raw/*.jsonl --output digest/my_digest.md
 
 入力の各行は`trend_word`キーの有無でトレンド、`id`＋`author_handle`キーの有無でポストと判定するため、種別の異なるJSONLを混在させて渡すこともできる。終了コードは`0`＝正常、`1`＝入力ファイルが見つからない、のいずれか。
 
+### media.py（収集済みJSONLからの画像ダウンロード）
+
+収集済みの`data/raw/*.jsonl`に記録された画像URLから、画像を直接ダウンロードして保存する。**入力は収集済みJSONLであり、X本体（x.com）へは再アクセスしない**（記録済みの画像CDN URLへHTTP GETするだけ）。そのため新たに収集し直したい場合は先に`search.py`等を実行しておくこと。
+
+```
+python scripts/media.py data/raw/related_20260725_003.jsonl
+python scripts/media.py data/raw/*.jsonl --out data/media/foo --max 50 --dry-run
+```
+
+| オプション | 説明 |
+|---|---|
+| `inputs`（必須・可変長） | 入力JSONLファイルパス（複数指定可、globパターン可） |
+| `--out` | 保存先ディレクトリ（省略時は`config.yaml`の`output.media_dir`配下。入力が複数の場合は指定先の下に入力ファイルごとのサブディレクトリを作る） |
+| `--max` | 対象にする画像の最大枚数（先頭からN枚。既存スキップ分も1枚と数える。省略時は無制限） |
+| `--dry-run` | ダウンロードせず、対象URLと保存予定パスを一覧表示するだけ |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+
+- **動画は対象外**：`media`のうち`type`が`photo`のものだけをダウンロードする。`video`／`animated_gif`は落とさず、スキップ件数をサマリーに出すだけ。
+- 保存先は既定で`data/media/<入力JSONLのファイル名>/`、ファイル名は`<post_id>_<連番2桁>.<拡張子>`（連番はそのポスト内のメディアの並び順。拡張子はレスポンスの`Content-Type`から決める）。
+- `pbs.twimg.com`のURLは原寸（`name=orig`）に変換して取得する（`:large`等のサイズ指定サフィックスは除去する）。
+- **同名のファイルが既にある場合はダウンロードせずスキップする**ため、同じJSONLを何度流しても二重取得にならない。一時ファイル（`.part`）に書き切ってからリネームするので、中断しても壊れたファイルは残らない。
+- 実行内で同一URLが複数ポストに現れた場合は1回だけ取得する。個別画像の取得失敗（404・接続エラー等）は警告を出してスキップし、全体は続行する。
+- ダウンロードは逐次実行で、1枚ごとに0.5〜2.0秒のランダム待機を挟む（並列化・自動リトライはしない）。**429を受けた場合は即座に中断**し、終了コード`3`で終わる。
+- 終了コードは`0`＝正常、`1`＝入力ファイルが見つからない・保存先が作れない、`3`＝レートリミット（429）検知、のいずれか。
+
 ## 設定ファイル（config.yaml）
 
 | キー | 内容 |
@@ -209,6 +235,7 @@ python scripts/digest.py data/raw/*.jsonl --output digest/my_digest.md
 | `output.raw_dir` | 生データ（JSONL）の出力先ディレクトリ（既定: `data/raw`） |
 | `output.state_dir` | 既読ID・差分管理ファイルの出力先ディレクトリ（既定: `state`） |
 | `output.digest_dir` | `digest.py`が生成するMarkdownダイジェストの出力先ディレクトリ（既定: `digest`） |
+| `output.media_dir` | `media.py`がダウンロードした画像の出力先ディレクトリ（既定: `data/media`。この下に入力JSONLごとのサブディレクトリを作る） |
 | `session.storage_state_path` | 手動ログイン結果（`storage_state`）の保存先（既定: `session/x_storage_state.json`） |
 | `browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `chromium`。不正値は`chromium`にフォールバックし警告を表示） |
 | `browser_executable_path` | `brave`使用時のみ必要。Brave実行ファイルの絶対パス。空／未指定なら一般的なインストール場所を自動探索する |
@@ -237,6 +264,8 @@ trend_word, tweet_volume, rank, collected_at
 - `state/<handle>_last_id.json`：`user_tweets.py`がハンドルごとに保存する前回取得済み最新ID
 - `state/bookmarks_last_id.json`：`bookmarks.py`が保存する前回取得済み最新ID
 
+**画像（`media.py`の出力）**：既定で`data/media/<入力JSONLのファイル名>/<post_id>_<連番2桁>.<拡張子>`。`.gitignore`で`data/media/`を除外しているためリポジトリには含まれない。
+
 **ダイジェスト（`digest.py`の出力Markdown）**：frontmatter（`type: reference`、`tags`、`source`＝検索条件やURL、`created`）に続き、`## 収集条件`（クエリ・期間・件数・収集日時）、`## 注目ポスト`（エンゲージメント合計順に本文要約100文字＋出典URL。著作権配慮のため全文転載はしない）、`## トレンド語`（言及数・rank）、生データJSONLへの相対パスリンク、という構成。
 
 ## トラブルシューティング
@@ -262,4 +291,4 @@ trend_word, tweet_volume, rank, collected_at
 
 本プログラムは配置場所未定のスタンドアロン構成であり、相対パス完結・外部依存最小で作られている。将来、現在の場所とは別のディレクトリに移動されることを想定している。
 
-`.gitignore`では`x_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する。
+`.gitignore`では`x_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する（`media.py`の保存先だけは既定パスの`data/media/`で除外している。`--out`で別の場所に保存する場合はその場所を各自で除外すること）。

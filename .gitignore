@@ -7,3 +7,4 @@ seen_ids.json
 *.jsonl
 state/
 digest/
+data/media/

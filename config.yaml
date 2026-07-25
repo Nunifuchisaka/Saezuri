@@ -21,6 +21,7 @@ output:
   raw_dir: data/raw     # 生データ（JSONL）の出力先ディレクトリ
   state_dir: state      # 既読ID・差分管理ファイルの出力先ディレクトリ
   digest_dir: digest    # digest.py が生成するMarkdownダイジェストの出力先ディレクトリ
+  media_dir: data/media # media.py がダウンロードした画像の出力先ディレクトリ（この下に入力JSONLごとのサブディレクトリを作る）
 
 # セッション関連
 session:

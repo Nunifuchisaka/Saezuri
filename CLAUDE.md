@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+常に日本語で応答する。
+
 ## 概要
 
 saezuriは、X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。公式X APIは有料のため採用せず、Playwrightのブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。
@@ -26,6 +28,7 @@ python scripts/user_tweets.py                                     # watch_accoun
 python scripts/trends.py                                          # トレンド取得
 python scripts/bookmarks.py                                       # サブ垢自身のブックマーク取得
 python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Markdownダイジェスト生成
+python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済みJSONLから画像ダウンロード
 ```
 
 自動テストは存在しない。単体で動作確認する場合はモジュールを直接importして関数を呼ぶ（例: `digest.py`のパース・整形系関数はPlaywright非依存で単体実行できる）。
@@ -68,9 +71,20 @@ python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Mark
 
 `data/raw/*.jsonl`を読み込みMarkdownダイジェストを生成する唯一の非Playwright依存モジュール。Xへの実アクセスは一切行わない。各行を`trend_word`キーの有無／`id`+`author_handle`キーの有無で`Post`/`TrendEntry`に判別する（`classify_record`）。エンゲージメント合計（like+repost+reply+quote）順の「注目ポスト」セクションは著作権配慮のため本文要約（先頭100文字）+出典URLのみで全文転載はしない設計を維持すること。
 
+### `media.py`（収集系と非依存）
+
+収集済み`data/raw/*.jsonl`に記録済みのメディアURLから画像だけをダウンロードする。`digest.py`と同じくPlaywright非依存で、X本体（x.com）へは一切アクセスしない（画像CDNへのHTTP GETのみ）。行の判別は`digest.py`の`classify_record`をそのままimportして流用し、Post以外・解釈できない行は`logger.warning()`でスキップする。
+
+- 対象は`MediaItem.type == "photo"`のみ。`video`／`animated_gif`はダウンロードせず件数だけ数える（この方針を変えない）。
+- ダウンロードは標準ライブラリ`urllib.request`のみで行い、`requirements.txt`に依存を足さない（外部依存最小の設計を維持する）。逐次実行・1枚ごとに0.5〜2.0秒のランダム待機（`config.yaml`の`wait_seconds`はスクロール用のため流用しない）。並列化・自動リトライは追加しない。
+- `pbs.twimg.com`のURLは`to_original_url()`で原寸化（サイズ指定サフィックス除去＋`name=orig`）する。他ホストのURLは変換しない。
+- 保存名は`<post_id>_<連番2桁>.<拡張子>`。同名（拡張子違い含む）のファイルが既にあればHTTPアクセス自体を行わずスキップする（再実行の冪等性）。書き込みは`.part`一時ファイル経由でリネームする。
+- 安全策：http/https以外のスキーム拒否、`Content-Type`が`image/`以外は保存しない、50MB上限超過で中断・一時ファイル削除。
+- 終了コードは`0`=正常 / `1`=設定・環境エラー / `3`=レートリミット（429）検知。429検知時は即中断し、そこまでの保存分は残す（リトライしない）。
+
 ## 設定ファイル（`config.yaml`）
 
-`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`、`session.storage_state_path`、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
+`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
 
 ## 配置・Git管理について
 
