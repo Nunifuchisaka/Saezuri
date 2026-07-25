@@ -4,13 +4,13 @@
 実行ごとに data/raw/related_<日付>_<連番3桁>.jsonl という新規ファイルへ保存する。
 台本・記事執筆は範囲外(既存方針どおり収集のみ)。
 
-収集する「関連」4種(いずれも未指定なら全部ON):
-    ①会話スレッド(reply)  : x.com/i/status/<id> を開き TweetDetail を傍受
-    ②引用ポスト(quote)    : SearchTimeline を quoted_tweet_id:<id> で回す
-    ③同一投稿者(author)   : UserTweets を起点Postの投稿者ハンドルで回す
-    ④類似キーワード(keyword): 起点本文からキーワード抽出 → SearchTimeline
+収集する「関連」3種(いずれも未指定なら全部ON):
+    ①会話スレッド(reply) : x.com/i/status/<id> を開き TweetDetail を傍受
+    ②引用ポスト(quote)   : SearchTimeline を quoted_tweet_id:<id> で回す
+    ③同一投稿者(author)  : UserTweets を起点Postの投稿者ハンドルで回す
 
-①のTweetDetailペイロードから起点Postの投稿者ハンドル・本文を得て、③④の材料にする。
+①のTweetDetailペイロードから起点Postの投稿者ハンドルを得て、③(ハンドル未知のID指定時)
+の材料にする。起点Post自身(会話スレッドのfocal等)は保存対象から除外する。
 
 使用例:
     python scripts/related.py --url https://x.com/foo/status/1234567890
@@ -67,49 +67,27 @@ EXIT_CHALLENGE = 4
 RELATION_REPLY = "reply"
 RELATION_QUOTE = "quote"
 RELATION_AUTHOR = "author"
-RELATION_KEYWORD = "keyword"
 
-# --replies/--quotes/--author/--keywords フラグ名と関係種別の対応
+# --replies/--quotes/--author フラグ名と関係種別の対応
 _FLAG_TO_RELATION = {
     "replies": RELATION_REPLY,
     "quotes": RELATION_QUOTE,
     "author": RELATION_AUTHOR,
-    "keywords": RELATION_KEYWORD,
 }
 
 # XのポストURL(x.com/<handle>/status/<id> または i/status/<id>)からハンドル・IDを取り出す
 STATUS_URL_RE = re.compile(r"(?:twitter|x)\.com/([^/?#]+)/status/(\d+)")
 
-_URL_RE = re.compile(r"https?://\S+")
-_MENTION_RE = re.compile(r"[@＠]\w+")
-_HASHTAG_RE = re.compile(r"[#＃](\w+)")
-# 主要語抽出用: 2文字以上の英数字トークン、または2文字以上の日本語(かな・カナ・漢字)トークン
-_WORD_RE = re.compile(r"[A-Za-z0-9_]{2,}|[ぁ-んァ-ヶ一-龠ー]{2,}")
-
-# キーワード抽出時に落とす一般語(英語の機能語 + 日本語の頻出語)
-_STOPWORDS = frozenset({
-    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "is", "are",
-    "was", "were", "this", "that", "it", "with", "as", "at", "by", "be", "from",
-    "you", "your", "i", "we", "my", "me", "so", "but", "not", "no", "do", "if",
-    "rt", "http", "https", "co", "amp", "www", "com",
-    "です", "ます", "した", "して", "する", "いる", "ある", "この", "その",
-    "これ", "それ", "という", "こと", "ため", "もの", "よう", "から", "まで",
-})
-
-# ④類似キーワード検索で抽出する最大語数
-DEFAULT_MAX_KEYWORDS = 3
-
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="起点ポスト1件から関連ポストを収集する(会話スレッド/引用/同一投稿者/類似キーワード)"
+        description="起点ポスト1件から関連ポストを収集する(会話スレッド/引用/同一投稿者)"
     )
     parser.add_argument("--url", default=None, help="起点ポストのURL(--idとどちらか必須)")
     parser.add_argument("--id", default=None, help="起点ポストの数値ID(--urlとどちらか必須)")
     parser.add_argument("--replies", action="store_true", help="①会話スレッド(親+リプライ)を収集")
     parser.add_argument("--quotes", action="store_true", help="②引用ポストを収集")
     parser.add_argument("--author", action="store_true", help="③同一投稿者の他の投稿を収集")
-    parser.add_argument("--keywords", action="store_true", help="④起点本文の類似キーワード投稿を収集")
     parser.add_argument("--unseen-only", action="store_true",
                         help="state/seen_ids.jsonで既読を除外し、保存分を書き戻す(既定は読み書きしない)")
     parser.add_argument("--max", type=int, default=None,
@@ -155,9 +133,7 @@ def resolve_start(url: str | None, tweet_id: str | None) -> tuple[str, str | Non
     return tid, None
 
 
-def resolve_relations(
-    replies: bool, quotes: bool, author: bool, keywords: bool
-) -> set[str]:
+def resolve_relations(replies: bool, quotes: bool, author: bool) -> set[str]:
     """関係選択フラグから収集対象の関係種別集合を決める(いずれも未指定なら全部ON)。"""
     selected: set[str] = set()
     if replies:
@@ -166,8 +142,6 @@ def resolve_relations(
         selected.add(RELATION_QUOTE)
     if author:
         selected.add(RELATION_AUTHOR)
-    if keywords:
-        selected.add(RELATION_KEYWORD)
     if not selected:
         return set(_FLAG_TO_RELATION.values())
     return selected
@@ -184,40 +158,6 @@ def build_status_url(start_id: str, handle: str | None = None) -> str:
     return f"https://x.com/{who}/status/{start_id}"
 
 
-def extract_keywords(text: str | None, max_keywords: int = DEFAULT_MAX_KEYWORDS) -> list[str]:
-    """起点本文から検索キーワードを簡易抽出する(ハッシュタグ優先、なければ主要語)。
-
-    形態素解析等の重い依存は使わない簡易ヒューリスティック。
-    - ハッシュタグがあればそれを優先(記号を除いた語、出現順、重複除去)。
-    - なければURL・メンションを除去した上で、2文字以上の英数字/日本語トークンから
-      ストップワードを除いて出現順に最大max_keywords語を返す。
-    """
-    if not text:
-        return []
-    tags = _HASHTAG_RE.findall(text)
-    if tags:
-        result: list[str] = []
-        for tag in tags:
-            if tag not in result:
-                result.append(tag)
-            if len(result) >= max_keywords:
-                break
-        return result
-
-    cleaned = _URL_RE.sub(" ", text)
-    cleaned = _MENTION_RE.sub(" ", cleaned)
-    result = []
-    for word in _WORD_RE.findall(cleaned):
-        if word.lower() in _STOPWORDS:
-            continue
-        if word in result:
-            continue
-        result.append(word)
-        if len(result) >= max_keywords:
-            break
-    return result
-
-
 def next_related_out_path(raw_dir: Path, today: str | None = None) -> Path:
     """raw_dir内のrelated_<今日の日付>_<連番>.jsonlを走査し、次の連番のパスを返す。"""
     today = today or datetime.now().strftime("%Y%m%d")
@@ -229,13 +169,18 @@ def next_related_out_path(raw_dir: Path, today: str | None = None) -> Path:
     return Path(raw_dir) / f"related_{today}_{max_seq + 1:03d}.jsonl"
 
 
-def merge_posts(collected: dict[str, Post], posts: list[Post]) -> int:
+def merge_posts(
+    collected: dict[str, Post], posts: list[Post], exclude_id: str | None = None
+) -> int:
     """postsをcollected(id→Post)へ初出優先でマージする。追加した件数を返す。
 
     既にcollectedに存在するidはスキップ(最初に出た種別のsource_queryを維持する)。
+    exclude_id(起点Post自身のid)に一致するPostは関連ではないため保存対象から除外する。
     """
     added = 0
     for post in posts:
+        if exclude_id is not None and post.id == exclude_id:
+            continue
         if post.id in collected:
             continue
         collected[post.id] = post
@@ -265,8 +210,8 @@ def collect_thread(
 ) -> tuple[Post | None, Exception | None]:
     """①TweetDetailを傍受して会話スレッドを収集し、起点Postを特定する。
 
-    save_repliesがTrueなら収集分をcollectedへマージする(reply種別)。Falseの場合は
-    起点Postの情報取得(ハンドル・本文)のみ行いマージしない。
+    save_repliesがTrueなら収集分(起点Post自身=focalを除く)をcollectedへマージする
+    (reply種別)。Falseの場合は起点Postのハンドル取得のみ行いマージしない。
     戻り値は(起点Post または None, ブロック検知例外 または None)。
     """
     collected_at = now_iso()
@@ -288,11 +233,11 @@ def collect_thread(
             page, capture, parse, max_items=max_items, wait_seconds_range=wait_range
         )
         if save_replies:
-            merge_posts(collected, posts)
+            merge_posts(collected, posts, exclude_id=start_id)
         return find_post(posts, start_id), None
     except (RateLimitedError, ChallengeDetectedError) as exc:
         if save_replies:
-            merge_posts(collected, buffer)
+            merge_posts(collected, buffer, exclude_id=start_id)
         return find_post(buffer, start_id), exc
     finally:
         try:
@@ -307,12 +252,14 @@ def collect_timeline_relation(
     goto_url: str,
     operation: str,
     source_query: str,
+    start_id: str,
     max_items: int,
     wait_range: tuple[float, float],
     collected: dict[str, Post],
 ) -> Exception | None:
-    """②③④共通: SearchTimeline/UserTweetsを傍受し収集分をcollectedへマージする。
+    """②③共通: SearchTimeline/UserTweetsを傍受し収集分をcollectedへマージする。
 
+    起点Post自身(start_id)は関連ではないため除外する。
     戻り値はブロック検知例外(RateLimited/Challenge)、正常時はNone。
     """
     collected_at = now_iso()
@@ -333,10 +280,10 @@ def collect_timeline_relation(
         posts = scroll_and_collect(
             page, capture, parse, max_items=max_items, wait_seconds_range=wait_range
         )
-        merge_posts(collected, posts)
+        merge_posts(collected, posts, exclude_id=start_id)
         return None
     except (RateLimitedError, ChallengeDetectedError) as exc:
-        merge_posts(collected, buffer)
+        merge_posts(collected, buffer, exclude_id=start_id)
         return exc
     finally:
         try:
@@ -353,7 +300,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"エラー: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    relations = resolve_relations(args.replies, args.quotes, args.author, args.keywords)
+    relations = resolve_relations(args.replies, args.quotes, args.author)
 
     config = load_config(args.config)
     raw_dir = Path(config["output"]["raw_dir"])
@@ -366,11 +313,10 @@ def run(args: argparse.Namespace) -> int:
     collected: dict[str, Post] = {}
     blocked: Exception | None = None
 
-    # 起点情報(ハンドル・本文)が必要ならTweetDetailを開く。
-    # ①replies選択、④keywords選択(本文が要る)、③author選択かつハンドル未知(ID指定)のいずれか。
+    # 起点情報(ハンドル)が必要ならTweetDetailを開く。
+    # ①replies選択、または③author選択かつハンドル未知(ID指定)のいずれか。
     need_detail = (
         RELATION_REPLY in relations
-        or RELATION_KEYWORD in relations
         or (RELATION_AUTHOR in relations and not start_handle)
     )
 
@@ -398,7 +344,6 @@ def run(args: argparse.Namespace) -> int:
                     )
 
                 eff_handle = start_handle or (start_post.author_handle if start_post else None)
-                eff_text = start_post.text if start_post else None
 
                 # ②引用ポスト
                 if blocked is None and RELATION_QUOTE in relations:
@@ -406,7 +351,7 @@ def run(args: argparse.Namespace) -> int:
                     blocked = collect_timeline_relation(
                         context, quote_url, "SearchTimeline",
                         build_source_query(start_id, RELATION_QUOTE),
-                        max_items, wait_range, collected,
+                        start_id, max_items, wait_range, collected,
                     )
 
                 # ③同一投稿者
@@ -415,27 +360,11 @@ def run(args: argparse.Namespace) -> int:
                         blocked = collect_timeline_relation(
                             context, f"https://x.com/{eff_handle}", "UserTweets",
                             build_source_query(start_id, RELATION_AUTHOR),
-                            max_items, wait_range, collected,
+                            start_id, max_items, wait_range, collected,
                         )
                     else:
                         logger.warning(
                             "起点の投稿者ハンドルが特定できなかったため、同一投稿者の収集(author)をスキップします"
-                        )
-
-                # ④類似キーワード
-                if blocked is None and RELATION_KEYWORD in relations:
-                    keywords = extract_keywords(eff_text)
-                    if keywords:
-                        keyword_url = build_search_url(" ".join(keywords), "live")
-                        logger.info("類似キーワード検索: %s", " ".join(keywords))
-                        blocked = collect_timeline_relation(
-                            context, keyword_url, "SearchTimeline",
-                            build_source_query(start_id, RELATION_KEYWORD),
-                            max_items, wait_range, collected,
-                        )
-                    else:
-                        logger.warning(
-                            "起点本文からキーワードを抽出できなかったため、類似キーワード収集(keyword)をスキップします"
                         )
             finally:
                 browser.close()
