@@ -42,6 +42,7 @@ TWEET_OPERATIONS = (
     "UserTweets",
     "UserTweetsAndReplies",
     "Bookmarks",
+    "TweetDetail",
 )
 
 # トレンド系のオペレーション名は正確な名称が変動しうる(ExplorePage等)ため、
