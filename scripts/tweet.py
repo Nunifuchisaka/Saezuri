@@ -6,7 +6,8 @@ x.com/i/status/<id>) で開き、TweetDetailオペレーションのGraphQLレ�
 (related.pyの①会話スレッド収集と違い、リプライ等の関連ポストは保存しない)。
 
 結果は標準出力に表示するとともに、実行ごとに
-data/raw/tweet_<日付>_<連番3桁>.jsonl という新規ファイルへ1件保存する。
+data/raw/tweet_<日付>_<連番3桁>.jsonl という新規ファイルへ保存する。
+起点ツイートが引用ツイートである場合は、引用元投稿も2件目として同じファイルに保存される。
 
 使用例:
     python scripts/tweet.py --url https://x.com/foo/status/1234567890

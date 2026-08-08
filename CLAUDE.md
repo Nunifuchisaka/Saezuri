@@ -31,7 +31,7 @@ python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Mark
 python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済みJSONLから画像ダウンロード
 ```
 
-自動テストは存在しない。単体で動作確認する場合はモジュールを直接importして関数を呼ぶ（例: `digest.py`のパース・整形系関数はPlaywright非依存で単体実行できる）。
+`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジックを検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
 
 ## 運用上の制約（コード変更時に踏まえること）
 
