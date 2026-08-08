@@ -12,6 +12,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [login.py（初回ログイン）](#loginpy初回ログイン)
   - [search.py（キーワード／ハッシュタグ検索）](#searchpyキーワードハッシュタグ検索)
   - [user_tweets.py（特定アカウント投稿追跡）](#user_tweetspy特定アカウント投稿追跡)
+  - [tweet.py（単一ツイート取得）](#tweetpy単一ツイート取得)
   - [trends.py（トレンド把握）](#trendspyトレンド把握)
   - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
   - [digest.py（Markdownダイジェスト生成）](#digestpymarkdownダイジェスト生成)
@@ -134,6 +135,8 @@ python scripts/user_tweets.py --handle some_user   # 特定の1アカウント�
 python scripts/user_tweets.py --include-replies
 ```
 
+なお、単一ツイートをURL/IDから直接1件だけ取得したい場合は[tweet.py](#tweetpy単一ツイート取得)を使う。
+
 | オプション | 説明 |
 |---|---|
 | `--handle` | 特定の1アカウントだけ実行（`@`は不要。省略時は`watch_accounts`全件） |
@@ -144,6 +147,26 @@ python scripts/user_tweets.py --include-replies
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
 
 結果は`data/raw/user_tweets_<日付>.jsonl`に追記する。ハンドルごとに`state/<handle>_last_id.json`へ前回取得済み最新IDを保存し、それより新しいIDの投稿のみを差分保存する。レートリミット・チャレンジ検知時はその時点までの収集分を保存し、残りのアカウントは処理しない。
+
+### tweet.py（単一ツイート取得）
+
+URLまたはIDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハンドル不明時は`x.com/i/status/<id>`）で開き、`TweetDetail`オペレーションのレスポンスを傍受する。会話スレッド全体やリプライは集めず、指定した1件が見つかった時点で打ち切る（スレッド全体・引用・同一投稿者の他投稿も含めて集めたい場合は`related.py`を使う）。
+
+```
+python scripts/tweet.py --url https://x.com/foo/status/1234567890
+python scripts/tweet.py --id 1234567890
+```
+
+| オプション | 説明 |
+|---|---|
+| `--url` | 対象ツイートのURL（`--id`とどちらか必須） |
+| `--id` | 対象ツイートの数値ID（`--url`とどちらか必須） |
+| `--max-rounds` | 起点ツイートが見つかるまでのドレイン試行回数の上限（スクロールはしない。既定: 5） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
+| `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+
+本文・投稿者・エンゲージメント数を標準出力に表示し、`data/raw/tweet_<日付>_<連番3桁>.jsonl`に1件保存する。対象ツイートが見つからなかった場合（削除・非公開・鍵アカウント等）は終了コード`1`でエラーメッセージを表示する。
 
 ### trends.py（トレンド把握）
 

@@ -51,6 +51,10 @@ python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済み
   - `parse_timeline_payload`/`parse_trends_payload`：GraphQLペイロードから`Post`/`TrendEntry`へ正規化。X側のレスポンス構造は非公開・無予告変更されるため、キー名を決め打ちせず「`instructions`という名のlistを再帰探索する」等の耐性を持たせている。想定キー欠如時は例外を投げず`logger.warning()`でそのエントリだけスキップし、全体は落とさない設計を踏襲すること。
   - `scroll_and_collect`：スクロール→`drain()`→ランダム待機（`config.yaml`の`wait_seconds`）を、上限件数到達または新規アイテムなしが規定回数（既定3回）続くまで繰り返す。429検知で`RateLimitedError`、チャレンジ画面遷移で`ChallengeDetectedError`を送出。
 
+### `scripts/tweet.py`（単一ツイート取得）
+
+URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハンドル不明時は`i/status/<id>`）で開き`TweetDetail`を傍受する。他の収集エントリポイントと異なり`scroll_and_collect`は使わず、指定IDのPostが見つかった時点で即座に打ち切る専用の`fetch_tweet`関数で完結させている（会話スレッド全体を集める`related.py`の①会話スレッド収集とは目的が異なるため独立させた）。`related.py`から`resolve_start`/`build_status_url`/`find_post`をimportして再利用する。結果は標準出力に表示しつつ`data/raw/tweet_<日付>_<連番3桁>.jsonl`に1件保存する。差分管理（state）は行わない。見つからなかった場合は終了コード1。
+
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 
 各スクリプトは同一パターンで構成される：
