@@ -343,7 +343,7 @@ def _parse_article(result: dict) -> tuple[Optional[str], Optional[str]]:
     blocks = _dig(article, "content_state", "blocks")
     text = None
     if isinstance(blocks, list):
-        lines = [b.get("text", "") for b in blocks if isinstance(b, dict)]
+        lines = [b.get("text") or "" for b in blocks if isinstance(b, dict)]
         if lines:
             text = "\n".join(lines)
     return title, text

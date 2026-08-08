@@ -105,3 +105,9 @@ def test_parse_tweet_result_article_text_skips_non_dict_blocks():
     blocks = [{"text": "有効な段落"}, "不正な要素", {"no_text_key": True}]
     post = _parse(_tweet_result_with_article("100", title="タイトル", blocks=blocks))
     assert post.article_text == "有効な段落\n"
+
+
+def test_parse_tweet_result_article_text_treats_none_as_empty():
+    blocks = [{"text": "段落1"}, {"text": None}, {"text": "段落2"}]
+    post = _parse(_tweet_result_with_article("100", title="タイトル", blocks=blocks))
+    assert post.article_text == "段落1\n\n段落2"
