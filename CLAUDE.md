@@ -55,6 +55,8 @@ python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済み
 
 URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハンドル不明時は`i/status/<id>`）で開き`TweetDetail`を傍受する。他の収集エントリポイントと異なり`scroll_and_collect`は使わず、指定IDのPostが見つかった時点で即座に打ち切る専用の`fetch_tweet`関数で完結させている（会話スレッド全体を集める`related.py`の①会話スレッド収集とは目的が異なるため独立させた）。`related.py`から`resolve_start`/`build_status_url`/`find_post`をimportして再利用する。結果は標準出力に表示しつつ`data/raw/tweet_<日付>_<連番3桁>.jsonl`に1件保存する。差分管理（state）は行わない。見つからなかった場合は終了コード1。
 
+対象ツイートが引用ツイートの場合、TweetDetailペイロードに同梱される`quoted_status_result.result`から引用元投稿も追加リクエストなしで正規化し(`capture.py`の`find_tweet_result`/`parse_quoted_post`)、同じJSONLへ2件目のレコード(`source_query`は`quoted-by:<起点投稿id>`)として保存する。この挙動は`tweet.py`のみが対象で、`parse_timeline_payload`を使う他の収集モジュール(`search.py`等)には影響しない。
+
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 
 各スクリプトは同一パターンで構成される：
