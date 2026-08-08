@@ -9,6 +9,10 @@ x.com/i/status/<id>) で開き、TweetDetailオペレーションのGraphQLレ�
 data/raw/tweet_<日付>_<連番3桁>.jsonl という新規ファイルへ保存する。
 起点ツイートが引用ツイートである場合は、引用元投稿も2件目として同じファイルに保存される。
 
+起点ツイートまたは引用元投稿がX Article(長文記事)へのリンクの場合、記事タイトル・
+本文もあわせて取得し画面表示・JSONLへ保存する(TweetDetailのレスポンスに同梱されて
+いるデータを解析するのみで、追加のGraphQLリクエストは発生しない)。
+
 使用例:
     python scripts/tweet.py --url https://x.com/foo/status/1234567890
     python scripts/tweet.py --id 1234567890
@@ -146,6 +150,20 @@ def fetch_tweet(
         page.close()
 
 
+def _print_post(post: Post) -> None:
+    """1件分の投稿情報を標準出力へ表示する。記事(X Article)へのリンクを含む
+    投稿の場合、記事タイトル・本文もあわせて表示する(追加リクエストなしで
+    capture.py側が既に解析済み)。"""
+    print(f"@{post.author_handle} ({post.author_name}) {post.created_at}")
+    print(post.text)
+    if post.article_title:
+        print(f"--- 記事: {post.article_title} ---")
+        print(post.article_text or "(本文取得失敗)")
+    print(f"いいね: {post.like_count} / RT: {post.repost_count} /"
+          f" 返信: {post.reply_count} / 引用: {post.quote_count}")
+    print(f"URL: {post.url}")
+
+
 def run(args: argparse.Namespace) -> int:
     try:
         tweet_id, handle = resolve_start(args.url, args.id)
@@ -200,18 +218,10 @@ def run(args: argparse.Namespace) -> int:
                 post.id, post.quoted_id,
             )
         storage.append_jsonl(out_path, records)
-        print(f"@{post.author_handle} ({post.author_name}) {post.created_at}")
-        print(post.text)
-        print(f"いいね: {post.like_count} / RT: {post.repost_count} /"
-              f" 返信: {post.reply_count} / 引用: {post.quote_count}")
-        print(f"URL: {post.url}")
+        _print_post(post)
         if quoted is not None:
             print("--- 引用元投稿 ---")
-            print(f"@{quoted.author_handle} ({quoted.author_name}) {quoted.created_at}")
-            print(quoted.text)
-            print(f"いいね: {quoted.like_count} / RT: {quoted.repost_count} /"
-                  f" 返信: {quoted.reply_count} / 引用: {quoted.quote_count}")
-            print(f"URL: {quoted.url}")
+            _print_post(quoted)
         print(f"保存先: {out_path}")
     else:
         print(f"エラー: ツイートが見つかりませんでした(id={tweet_id})。"
