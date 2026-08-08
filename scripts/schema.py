@@ -37,6 +37,8 @@ class Post:
     is_repost: bool = False
     quoted_id: Optional[str] = None
     source_query: Optional[str] = None
+    article_title: Optional[str] = None
+    article_text: Optional[str] = None
 
     def to_dict(self) -> dict:
         """設計書記載の項目順でJSONL保存用の辞書に変換する"""
@@ -47,6 +49,8 @@ class Post:
             "author_name": self.author_name,
             "created_at": self.created_at,
             "text": self.text,
+            "article_title": self.article_title,
+            "article_text": self.article_text,
             "lang": self.lang,
             "like_count": self.like_count,
             "repost_count": self.repost_count,
@@ -70,6 +74,8 @@ class Post:
             author_name=data["author_name"],
             created_at=data["created_at"],
             text=data["text"],
+            article_title=data.get("article_title"),
+            article_text=data.get("article_text"),
             lang=data.get("lang"),
             like_count=data["like_count"],
             repost_count=data["repost_count"],
