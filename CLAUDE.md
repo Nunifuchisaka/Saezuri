@@ -49,6 +49,7 @@ python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済み
 - **`capture.py`**：収集処理の中核。
   - `GraphQLCapture`：`page.on("response")`で対象オペレーション（`SearchTimeline`/`UserTweets`/`UserTweetsAndReplies`/`Bookmarks`、トレンド系は`ExplorePage`等を部分一致）のレスポンスを保持し、`drain()`時に初めて`response.json()`を読む（ハンドラ内での同期読み出しによる取りこぼし・デッドロックを避けるため）。
   - `parse_timeline_payload`/`parse_trends_payload`：GraphQLペイロードから`Post`/`TrendEntry`へ正規化。X側のレスポンス構造は非公開・無予告変更されるため、キー名を決め打ちせず「`instructions`という名のlistを再帰探索する」等の耐性を持たせている。想定キー欠如時は例外を投げず`logger.warning()`でそのエントリだけスキップし、全体は落とさない設計を踏襲すること。
+  - `_parse_tweet_result`は投稿本体の正規化に加え、`result.article.article_results.result`（X Article＝長文記事へのリンクを含む投稿の場合に同梱される）を`_parse_article`で解析し`Post.article_title`/`Post.article_text`に格納する。新規GraphQLリクエストは発生しない（既に捕捉済みのレスポンスの解析のみ）。記事でない投稿では両方`None`のままで、これは異常系ではないため警告も出さない。`content_state.blocks[].text`を改行連結したプレーンテキストとして保存する（装飾・箇条書き記号は失われる）。
   - `scroll_and_collect`：スクロール→`drain()`→ランダム待機（`config.yaml`の`wait_seconds`）を、上限件数到達または新規アイテムなしが規定回数（既定3回）続くまで繰り返す。429検知で`RateLimitedError`、チャレンジ画面遷移で`ChallengeDetectedError`を送出。
 
 ### `scripts/tweet.py`（単一ツイート取得）
@@ -56,6 +57,8 @@ python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済み
 URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハンドル不明時は`i/status/<id>`）で開き`TweetDetail`を傍受する。他の収集エントリポイントと異なり`scroll_and_collect`は使わず、指定IDのPostが見つかった時点で即座に打ち切る専用の`fetch_tweet`関数で完結させている（会話スレッド全体を集める`related.py`の①会話スレッド収集とは目的が異なるため独立させた）。`related.py`から`resolve_start`/`build_status_url`/`find_post`をimportして再利用する。結果は標準出力に表示しつつ`data/raw/tweet_<日付>_<連番3桁>.jsonl`に1件保存する。差分管理（state）は行わない。見つからなかった場合は終了コード1。
 
 対象ツイートが引用ツイートの場合、TweetDetailペイロードに同梱される`quoted_status_result.result`から引用元投稿も追加リクエストなしで正規化し(`capture.py`の`find_tweet_result`/`parse_quoted_post`)、同じJSONLへ2件目のレコード(`source_query`は`quoted-by:<起点投稿id>`)として保存する。この挙動は`tweet.py`のみが対象で、`parse_timeline_payload`を使う他の収集モジュール(`search.py`等)には影響しない。
+
+起点投稿・引用元投稿いずれかがX Articleへのリンクの場合、記事タイトル・本文も`Post.article_title`/`Post.article_text`として同時に保存・標準出力表示される。この解析自体は`capture.py`の`_parse_tweet_result`に組み込まれているため、`tweet.py`専用ではなく`search.py`等の収集モジュールで収集した投稿にも同様に適用される（引用元投稿の取得自体が`tweet.py`専用なのは変わらない）。標準出力の表示は`tweet.py`の`_print_post`ヘルパーに集約した（起点投稿・引用元投稿の表示コードの重複を解消）。
 
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 

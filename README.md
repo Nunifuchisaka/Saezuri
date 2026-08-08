@@ -170,6 +170,8 @@ python scripts/tweet.py --id 1234567890
 
 対象ツイートが引用ツイートの場合、`quoted_status_result`として同梱されている引用元投稿も追加リクエストなしで同時に取得し、同じJSONLファイルに2件目のレコード(`source_query`は`quoted-by:<起点投稿id>`)として保存する。標準出力にも起点投稿に続けて引用元投稿を表示する。引用元が削除済み・非公開等で取得できない場合はエラーにせず、起点投稿のみを保存して正常終了する。
 
+起点投稿・引用元投稿いずれかがX Article（長文記事）へのリンクの場合、記事タイトル・本文もあわせて取得する。これも`TweetDetail`のレスポンスに既に同梱されているデータを解析するだけで、追加のGraphQLリクエストは発生しない。記事本文はプレーンテキスト化して保存する（太字等の装飾・箇条書き記号は失われる）。記事でない通常の投稿では従来通り影響しない。
+
 ### trends.py（トレンド把握）
 
 `x.com/explore/tabs/for-you`を開き、トレンド系オペレーション（`ExplorePage`等、名称の変動を考慮し緩めにキーワード判定）を傍受する。
@@ -272,7 +274,7 @@ python scripts/media.py data/raw/*.jsonl --out data/media/foo --max 50 --dry-run
 **生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`）は以下の共通スキーマ。
 
 ```
-id, url, author_handle, author_name, created_at, text, lang,
+id, url, author_handle, author_name, created_at, text, article_title, article_text, lang,
 like_count, repost_count, reply_count, quote_count,
 media(type/url配列), is_repost, quoted_id, source_query, collected_at
 ```
