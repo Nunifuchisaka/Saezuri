@@ -327,6 +327,28 @@ def _parse_author(result: dict) -> tuple[Optional[str], Optional[str]]:
     return (handle, name)
 
 
+def _parse_article(result: dict) -> tuple[Optional[str], Optional[str]]:
+    """resultのarticle.article_results.resultから(記事タイトル, 本文)を取り出す。
+
+    記事(X Article)へのリンクを含まない通常の投稿では(None, None)を返す
+    (これは異常系ではなく通常のケースのため警告は出さない)。本文は
+    content_state.blocks[].textを改行で連結したプレーンテキスト(太字等の
+    インライン装飾・箇条書き記号は失われる)。blocksが無い・空の場合は
+    本文None(タイトルのみのケースを許容する)。
+    """
+    article = _dig(result, "article", "article_results", "result")
+    if not isinstance(article, dict):
+        return None, None
+    title = article.get("title")
+    blocks = _dig(article, "content_state", "blocks")
+    text = None
+    if isinstance(blocks, list):
+        lines = [b.get("text", "") for b in blocks if isinstance(b, dict)]
+        if lines:
+            text = "\n".join(lines)
+    return title, text
+
+
 def _parse_tweet_result(
     result: dict,
     operation: str,
@@ -354,6 +376,8 @@ def _parse_tweet_result(
         logger.warning("%s: 著者情報(screen_name)が見つからないため1件スキップします(id=%s)", operation, post_id)
         return None
 
+    article_title, article_text = _parse_article(result)
+
     return Post(
         id=str(post_id),
         url=f"https://x.com/{handle}/status/{post_id}",
@@ -361,6 +385,8 @@ def _parse_tweet_result(
         author_name=name or "",
         created_at=legacy.get("created_at") or "",
         text=text,
+        article_title=article_title,
+        article_text=article_text,
         lang=legacy.get("lang"),
         like_count=int(legacy.get("favorite_count") or 0),
         repost_count=int(legacy.get("retweet_count") or 0),
