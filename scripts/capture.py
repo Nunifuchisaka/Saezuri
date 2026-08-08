@@ -292,17 +292,25 @@ def _parse_media(legacy: dict) -> list[MediaItem]:
     return items
 
 
-def _resolve_tweet_result(item_content: dict) -> Optional[dict]:
-    """itemContentからtweet_results.resultを取り出す。ツイートでなければNone。"""
-    result = _dig(item_content, "tweet_results", "result")
+def _unwrap_visibility_results(result: Any) -> Optional[dict]:
+    """TweetWithVisibilityResults(閲覧制限付きツイート)の1段ネストを吸収する。"""
     if not isinstance(result, dict):
         return None
-    # 閲覧制限付きツイートは1段ネストが深い
     if result.get("__typename") == "TweetWithVisibilityResults":
         result = result.get("tweet")
         if not isinstance(result, dict):
             return None
     return result
+
+
+def _resolve_tweet_result(item_content: dict) -> Optional[dict]:
+    """itemContentからtweet_results.resultを取り出す。ツイートでなければNone。"""
+    return _unwrap_visibility_results(_dig(item_content, "tweet_results", "result"))
+
+
+def _resolve_quoted_result(result: dict) -> Optional[dict]:
+    """resultのquoted_status_result.resultを取り出す。引用ポストでなければNone。"""
+    return _unwrap_visibility_results(_dig(result, "quoted_status_result", "result"))
 
 
 def _parse_author(result: dict) -> tuple[Optional[str], Optional[str]]:
@@ -398,6 +406,49 @@ def parse_timeline_payload(
         if post is not None:
             posts.append(post)
     return posts
+
+
+def find_tweet_result(payload: dict, tweet_id: str) -> Optional[dict]:
+    """payload中からidがtweet_idに一致するtweet_results.resultの生dictを探す。
+
+    parse_timeline_payload()は正規化後のPostしか返さないため、quoted_status_result
+    等の正規化前データを参照したい呼び出し元(tweet.pyの引用元投稿取得)向けに用意する。
+    見つからなければNone。
+    """
+    instructions = _find_instructions(payload)
+    for item_content in _iter_item_contents(instructions):
+        if item_content.get("itemType") not in (None, "TimelineTweet"):
+            continue
+        result = _resolve_tweet_result(item_content)
+        if result is None:
+            continue
+        legacy = result.get("legacy") or _dig(result, "tweet", "legacy")
+        if not isinstance(legacy, dict):
+            continue
+        post_id = legacy.get("id_str") or result.get("rest_id")
+        if post_id and str(post_id) == tweet_id:
+            return result
+    return None
+
+
+def parse_quoted_post(
+    result: dict,
+    origin_id: str,
+    operation: str,
+    collected_at: str,
+) -> Optional[Post]:
+    """resultのquoted_status_resultを検出し、引用元投稿をPostへ正規化する。
+
+    起点投稿(result)が引用ツイートでない場合、または引用元が削除済み等で
+    必須キーを欠く場合はNone(後者は_parse_tweet_result内でlogger.warning済み)。
+    tweet.py専用(parse_timeline_payloadを使う他の収集モジュールはこの関数を呼ばない)。
+    """
+    quoted_result = _resolve_quoted_result(result)
+    if quoted_result is None:
+        return None
+    return _parse_tweet_result(
+        quoted_result, operation, f"quoted-by:{origin_id}", collected_at
+    )
 
 
 _VOLUME_RE = re.compile(r"([\d,.]+)\s*([KkMm万])?")
