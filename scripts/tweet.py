@@ -31,8 +31,10 @@ from capture import (
     ChallengeDetectedError,
     GraphQLCapture,
     RateLimitedError,
+    find_tweet_result,
     get_wait_seconds_range,
     now_iso,
+    parse_quoted_post,
     parse_timeline_payload,
 )
 from related import build_status_url, find_post, resolve_start
@@ -92,20 +94,30 @@ def fetch_tweet(
     tweet_id: str,
     wait_range: tuple[float, float],
     max_rounds: int,
-) -> tuple[Post | None, Exception | None]:
+) -> tuple[Post | None, Post | None, Exception | None]:
     """TweetDetailを傍受し、tweet_idに一致するPostが見つかるまでドレインを繰り返す。
 
     スクロールはせず(会話スレッド全体の収集は範囲外)、起点ツイートが見つかった
-    時点で即座に打ち切る。戻り値は(見つかったPost または None, ブロック検知例外 または None)。
+    時点で即座に打ち切る。起点ツイートが引用ツイートの場合、同じレスポンス内に
+    同梱されているquoted_status_resultから引用元投稿も追加リクエストなしで
+    正規化して同時に返す。
+    戻り値は(見つかった起点Post または None, 引用元Post または None(引用でない・
+    取得失敗時),ブロック検知例外 または None)。
     """
     collected_at = now_iso()
     buffer: list[Post] = []
+    quoted: Post | None = None
 
     def parse(payload: dict, op: str) -> list:
+        nonlocal quoted
         posts = parse_timeline_payload(
             payload, op, source_query=f"tweet:{tweet_id}", collected_at=collected_at
         )
         buffer.extend(posts)
+        if quoted is None:
+            raw_result = find_tweet_result(payload, tweet_id)
+            if raw_result is not None:
+                quoted = parse_quoted_post(raw_result, tweet_id, op, collected_at)
         return posts
 
     page = context.new_page()
@@ -120,11 +132,11 @@ def fetch_tweet(
             capture.raise_if_blocked(page)
             found = find_post(buffer, tweet_id)
             if found is not None:
-                return found, None
+                return found, quoted, None
             page.wait_for_timeout(random.uniform(*wait_range) * 1000)
-        return find_post(buffer, tweet_id), None
+        return find_post(buffer, tweet_id), quoted, None
     except (RateLimitedError, ChallengeDetectedError) as exc:
-        return find_post(buffer, tweet_id), exc
+        return find_post(buffer, tweet_id), quoted, exc
     finally:
         try:
             capture.detach(page)
@@ -146,6 +158,7 @@ def run(args: argparse.Namespace) -> int:
     browser_name = args.browser or get_browser_name(config)
 
     post: Post | None = None
+    quoted: Post | None = None
     blocked: Exception | None = None
 
     try:
@@ -157,7 +170,7 @@ def run(args: argparse.Namespace) -> int:
             try:
                 context = new_context(browser, config)
                 require_login(context)
-                post, blocked = fetch_tweet(
+                post, quoted, blocked = fetch_tweet(
                     context,
                     build_status_url(tweet_id, handle),
                     tweet_id,
@@ -176,12 +189,28 @@ def run(args: argparse.Namespace) -> int:
     out_path = None
     if post is not None:
         out_path = next_tweet_out_path(raw_dir)
-        storage.append_jsonl(out_path, [post.to_dict()])
+        records = [post.to_dict()]
+        if quoted is not None:
+            records.append(quoted.to_dict())
+        elif post.quoted_id:
+            logger.info(
+                "起点ツイート(id=%s)は引用ツイートですが、引用元(id=%s)の取得に"
+                "失敗しました(削除・非公開の可能性)。起点投稿のみ保存します。",
+                post.id, post.quoted_id,
+            )
+        storage.append_jsonl(out_path, records)
         print(f"@{post.author_handle} ({post.author_name}) {post.created_at}")
         print(post.text)
         print(f"いいね: {post.like_count} / RT: {post.repost_count} /"
               f" 返信: {post.reply_count} / 引用: {post.quote_count}")
         print(f"URL: {post.url}")
+        if quoted is not None:
+            print("--- 引用元投稿 ---")
+            print(f"@{quoted.author_handle} ({quoted.author_name}) {quoted.created_at}")
+            print(quoted.text)
+            print(f"いいね: {quoted.like_count} / RT: {quoted.repost_count} /"
+                  f" 返信: {quoted.reply_count} / 引用: {quoted.quote_count}")
+            print(f"URL: {quoted.url}")
         print(f"保存先: {out_path}")
     else:
         print(f"エラー: ツイートが見つかりませんでした(id={tweet_id})。"
