@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 x_storage_state.json
+instagram_storage_state.json
 seen_ids.json
 *_last_id.json
 *.jsonl
