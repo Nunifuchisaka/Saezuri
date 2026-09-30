@@ -176,12 +176,26 @@ class InstagramCapture(GraphQLCapture):
     (capture.scroll_and_collectからそのまま呼ばれる)。
     """
 
+    # サブクラス(threads.pyのThreadsCapture)で差し替えるメッセージ
+    service_name = "Instagram"
+    relogin_message = RELOGIN_MESSAGE
+
     def __init__(self) -> None:
         super().__init__(operations=())
         self._challenge = False
 
+    def endpoint_name(self, url: str) -> Optional[str]:
+        """捕捉対象URLならエンドポイント名を返す。サブクラスで差し替える。"""
+        return extract_endpoint_name(url)
+
+    def is_login_url(self, url: str) -> bool:
+        return is_login_url(url)
+
+    def is_challenge_url(self, url: str) -> bool:
+        return is_instagram_challenge_url(url)
+
     def _on_response(self, response: Response) -> None:
-        endpoint = extract_endpoint_name(response.url)
+        endpoint = self.endpoint_name(response.url)
         if endpoint is None:
             return
         if is_rate_limited(response.status):
@@ -207,13 +221,13 @@ class InstagramCapture(GraphQLCapture):
     def raise_if_blocked(self, page: Optional[Page] = None) -> None:
         if self._rate_limited:
             raise RateLimitedError("レートリミット(429)を検知したため収集を中断します。しばらく時間を置いてください。")
-        if self._challenge or (page is not None and is_instagram_challenge_url(page.url)):
+        if self._challenge or (page is not None and self.is_challenge_url(page.url)):
             raise ChallengeDetectedError(
-                f"Instagramのチャレンジ画面/確認要求を検知しました: {page.url if page else ''} "
+                f"{self.service_name}のチャレンジ画面/確認要求を検知しました: {page.url if page else ''} "
                 "自動突破は行いません。ブラウザで手動対応してください。"
             )
-        if page is not None and is_login_url(page.url):
-            raise SessionExpiredError(RELOGIN_MESSAGE)
+        if page is not None and self.is_login_url(page.url):
+            raise SessionExpiredError(self.relogin_message)
 
 
 # ---------------------------------------------------------------------------

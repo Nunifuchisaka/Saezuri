@@ -40,6 +40,13 @@ instagram:
   watch_accounts: []
   storage_state_path: session/instagram_storage_state.json  # ig_login.pyの手動ログイン結果の保存先
 
+# Threads収集(th_login.py / th_user_posts.py)用の設定。X用・Instagram用のセッションとは別ファイルで管理する。
+threads:
+  # 追跡対象のThreadsユーザー名(@は付けない)
+  # 例: watch_accounts: ["some_brand", "another_brand"]
+  watch_accounts: []
+  storage_state_path: session/threads_storage_state.json  # th_login.pyの手動ログイン結果の保存先
+
 # Brave使用時のみ必要。Brave実行ファイルの絶対パス。
 # 空/未指定なら一般的なインストール場所(下記例など)を自動探索する。
 # 他の環境に持って行く場合や自動検出に失敗する場合はここに絶対パスを指定する。

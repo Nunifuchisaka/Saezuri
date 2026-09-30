@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 概要
 
-saezuriは、X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマーク、およびInstagramの特定アカウントの投稿をPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。公式X APIは有料のため採用せず、Playwrightのブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。
+saezuriは、X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマーク、およびInstagram・Threadsの特定アカウントの投稿をPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。公式X APIは有料のため採用せず、Playwrightのブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。
 
 台本・記事本体への取捨選択・執筆は本ツールの範囲外（vrchat-video-script／note-vrchat-guideスキル側の担当）。
 
@@ -31,9 +31,11 @@ python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Mark
 python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済みJSONLから画像ダウンロード
 python scripts/ig_login.py                                        # Instagramの初回・失効時の手動ログイン
 python scripts/ig_user_posts.py                                   # instagram.watch_accounts全件の投稿追跡
+python scripts/th_login.py                                        # Threadsの初回・失効時の手動ログイン
+python scripts/th_user_posts.py                                   # threads.watch_accounts全件の投稿追跡
 ```
 
-`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`は`instagram.py`の投稿正規化ロジックを検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
+`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`・`tests/test_threads_parse.py`は`instagram.py`・`threads.py`の投稿正規化ロジックを検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
 
 ## 運用上の制約（コード変更時に踏まえること）
 
@@ -84,6 +86,15 @@ X側と同じ方針（手動ログインのstorage_state再利用・内部APIレ
 - **`ig_login.py`**：`login.py`のInstagram版。`sessionid` Cookie付与をポーリングで待ってstorage_stateを保存する。自動入力は追加しない。
 - **`ig_user_posts.py`**：`user_tweets.py`と同じ構成・終了コード契約。`data/raw/instagram_posts_<日付>.jsonl`に追記し、`state/instagram_<ユーザー名>_last_id.json`で差分管理（`user_tweets.py`の`filter_new_posts`/`max_post_id`/`dedupe_by_id`を再利用）。収集途中の失効（ログイン画面遷移）もそこまでの分を保存してから終了コード2で終える。
 
+### Threads収集（`scripts/threads.py` / `th_login.py` / `th_user_posts.py`）
+
+ThreadsはInstagramと同じ基盤で投稿ノードもv1形式とほぼ同じため、`instagram.py`を再利用する（Instagram収集と同じ方針・同じ終了コード契約）。
+
+- **`threads.py`**（共通基盤）：Threads用storage_state（`threads.storage_state_path`）のロードと、`threads.com`/`threads.net`の`sessionid` Cookieによるログイン検証（`require_threads_login`）。`ThreadsCapture`は`InstagramCapture`を継承し、`endpoint_name`/`is_login_url`/`is_challenge_url`をThreads用に差し替えている（`InstagramCapture`側はこれらのメソッド経由で判定するため、判定条件を変える場合はオーバーライドで行う）。
+- **初回表示分はAPIではなくページ埋め込みJSON**（`<script type="application/json">`）で届くため、`load_embedded_payloads`で取り出し`ThreadsCapture.inject()`で次の`drain()`に載せてから`scroll_and_collect`に入る。
+- **`parse_threads_payload`**：`text_post_app_info`を持つv1形式の投稿ノードを再帰探索で拾う（内側の引用元投稿・カルーセル子要素には潜らない）。メディア抽出・時刻変換は`instagram.py`の`_parse_v1_media_list`/`_timestamp_to_iso`等を流用。`reply_count`＝`direct_reply_count`、`repost_count`/`quote_count`＝`text_post_app_info`の値、`quoted_id`＝`share_info.quoted_post`のpk、投稿者が対象アカウントと異なる投稿は`is_repost=True`。
+- **`th_login.py`** / **`th_user_posts.py`**：`ig_login.py`/`ig_user_posts.py`と同構成。`data/raw/threads_posts_<日付>.jsonl`に追記し、`state/threads_<ユーザー名>_last_id.json`で差分管理。
+
 ### `digest.py`（収集系と非依存）
 
 `data/raw/*.jsonl`を読み込みMarkdownダイジェストを生成する唯一の非Playwright依存モジュール。Xへの実アクセスは一切行わない。各行を`trend_word`キーの有無／`id`+`author_handle`キーの有無で`Post`/`TrendEntry`に判別する（`classify_record`）。エンゲージメント合計（like+repost+reply+quote）順の「注目ポスト」セクションは著作権配慮のため本文要約（先頭100文字）+出典URLのみで全文転載はしない設計を維持すること。
@@ -101,7 +112,7 @@ X側と同じ方針（手動ログインのstorage_state再利用・内部APIレ
 
 ## 設定ファイル（`config.yaml`）
 
-`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`instagram.watch_accounts`/`instagram.storage_state_path`（Instagram収集用）、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
+`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`instagram.watch_accounts`/`instagram.storage_state_path`（Instagram収集用）、`threads.watch_accounts`/`threads.storage_state_path`（Threads収集用）、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
 
 ## 配置・Git管理について
 

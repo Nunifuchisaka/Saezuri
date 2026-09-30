@@ -1,6 +1,6 @@
 # saezuri
 
-X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。Instagramの特定アカウントの投稿収集にも対応する。
+X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。Instagram・Threadsの特定アカウントの投稿収集にも対応する。
 
 ## 目次
 
@@ -18,6 +18,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [digest.py（Markdownダイジェスト生成）](#digestpymarkdownダイジェスト生成)
   - [media.py（収集済みJSONLからの画像ダウンロード）](#mediapy収集済みjsonlからの画像ダウンロード)
   - [Instagram収集（ig_login.py／ig_user_posts.py）](#instagram収集ig_loginpyig_user_postspy)
+  - [Threads収集（th_login.py／th_user_posts.py）](#threads収集th_loginpyth_user_postspy)
 - [設定ファイル（config.yaml）](#設定ファイルconfigyaml)
 - [出力ファイルについて](#出力ファイルについて)
 - [トラブルシューティング](#トラブルシューティング)
@@ -282,6 +283,29 @@ Instagramの特定アカウントの投稿を、X側と同じ方式（手動ロ�
 - 終了コードはX側と同じ契約（`0`＝正常／`1`＝設定・環境エラー／`2`＝セッション失効／`3`＝レートリミット（429）／`4`＝チャレンジ画面・確認要求）。3・4（および収集途中の失効による2）でも検知時点までの収集分は保存してから終了し、残りのアカウントは処理しない。
 - キーワード・ハッシュタグ検索には対応していない（Instagram側のハッシュタグページは仕様変更が多く、安定した傍受対象がないため）。
 
+### Threads収集（th_login.py／th_user_posts.py）
+
+Threadsの特定アカウントの投稿を、Instagram収集と同じ方式（手動ログインしたセッションの再利用＋内部APIレスポンスの傍受）で収集する。公式Threads APIは原則として自分のアカウントの投稿しか扱えないため採用していない。ThreadsもMetaの利用規約でスクレイピングを禁止しているため、[利用規約リスクについて](#利用規約リスクについて必読)の緩和策を同様に適用すること。
+
+1. 初回・失効時に手動ログインする（X用・Instagram用とはセッションが別。Threads（Instagramアカウント連携）のサブ垢でログインする）
+   ```
+   python scripts/th_login.py
+   ```
+   ブラウザでThreadsに手動ログインすると、`threads.com`の`sessionid` Cookieの付与を検知して`config.yaml`の`threads.storage_state_path`（既定: `session/threads_storage_state.json`）へ保存する（最大5分待機）。ID/PWの自動入力は行わない。
+2. `config.yaml`の`threads.watch_accounts`に追跡したいユーザー名を列挙し、収集する
+   ```
+   python scripts/th_user_posts.py                     # threads.watch_accounts全件
+   python scripts/th_user_posts.py --user some_brand   # 特定の1アカウントのみ
+   ```
+
+オプション（`--user`／`--max`／`--config`／`--browser`／`--headed`）は`ig_user_posts.py`と同じ（`--user`の省略時は`threads.watch_accounts`全件）。
+
+- `threads.com/@<ユーザー名>`を開き、初回表示分はページに埋め込まれたJSONから、スクロールで追加読み込みされる分は内部API（`graphql/query`等）のレスポンスから投稿を抽出する。待機・上限件数・停止条件はX側と共通（`wait_seconds`・`max_items`）。
+- 結果は`data/raw/threads_posts_<日付>.jsonl`に追記する。ポストの共通スキーマで保存し、`url`は`https://www.threads.com/@<投稿者>/post/<ショートコード>`、`like_count`はいいね数、`reply_count`は直接の返信数、`repost_count`／`quote_count`はリポスト数・引用数、`quoted_id`は引用元投稿のID、`source_query`は`threads:<ユーザー名>`。連投（スレッド）は1投稿ずつ別レコードになる。対象アカウントのプロフィールに並ぶ他人の投稿（リポスト）は`is_repost: true`になる。
+- 差分管理は`state/threads_<ユーザー名>_last_id.json`（ID大小比較で新規判定）。
+- `digest.py`・`media.py`にそのまま渡せる。終了コードの契約・ブロック検知時の挙動は`ig_user_posts.py`と同じ。
+- キーワード検索・返信タブの収集には対応していない。
+
 ## 設定ファイル（config.yaml）
 
 | キー | 内容 |
@@ -298,13 +322,15 @@ Instagramの特定アカウントの投稿を、X側と同じ方式（手動ロ�
 | `browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `chromium`。不正値は`chromium`にフォールバックし警告を表示） |
 | `instagram.watch_accounts` | `ig_user_posts.py`が追跡対象にするInstagramユーザー名のリスト（`@`は付けない） |
 | `instagram.storage_state_path` | `ig_login.py`の手動ログイン結果の保存先（既定: `session/instagram_storage_state.json`） |
+| `threads.watch_accounts` | `th_user_posts.py`が追跡対象にするThreadsユーザー名のリスト（`@`は付けない） |
+| `threads.storage_state_path` | `th_login.py`の手動ログイン結果の保存先（既定: `session/threads_storage_state.json`） |
 | `browser_executable_path` | `brave`使用時のみ必要。Brave実行ファイルの絶対パス。空／未指定なら一般的なインストール場所を自動探索する |
 
 いずれもプロジェクトルートからの相対パスで指定する（`browser_executable_path`は絶対パス）。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要（[セットアップ](#セットアップ)参照）。`brave`使用時、自動検出（`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`等の一般的なインストール場所を順に確認）に失敗する場合は`browser_executable_path`に絶対パスを指定すること。
 
 ## 出力ファイルについて
 
-**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`/`ig_user_posts.py`）は以下の共通スキーマ。
+**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`/`ig_user_posts.py`/`th_user_posts.py`）は以下の共通スキーマ。
 
 ```
 id, url, author_handle, author_name, created_at, text, lang,
@@ -324,6 +350,7 @@ trend_word, tweet_volume, rank, collected_at
 - `state/<handle>_last_id.json`：`user_tweets.py`がハンドルごとに保存する前回取得済み最新ID
 - `state/bookmarks_last_id.json`：`bookmarks.py`が保存する前回取得済み最新ID
 - `state/instagram_<ユーザー名>_last_id.json`：`ig_user_posts.py`がアカウントごとに保存する前回取得済み最新ID
+- `state/threads_<ユーザー名>_last_id.json`：`th_user_posts.py`がアカウントごとに保存する前回取得済み最新ID
 
 **画像（`media.py`の出力）**：既定で`data/media/<入力JSONLのファイル名>/<post_id>_<連番2桁>.<拡張子>`。`.gitignore`で`data/media/`を除外しているためリポジトリには含まれない。
 
@@ -333,7 +360,7 @@ trend_word, tweet_volume, rank, collected_at
 
 - **取得0件が続く**：Xの内部API構造変更が疑われる。コンソールの警告ログ（`instructionsが見つかりません(API構造変更の可能性)`等）を確認する。パーサーはベストエフォート実装のため、構造変更時は例外を投げず警告してスキップする設計になっている。
 - **終了コード3（429／レートリミット検知）**：クールダウンして時間を置いてから再実行する。すぐに再実行しない。
-- **終了コード2（セッション失効）**：`セッションが失効しています。login.pyを再実行して手動ログインし直してください。`と表示される。`python scripts/login.py`を再実行して手動ログインし直す。自動再ログインは行わない。Instagram側（`ig_user_posts.py`）の場合は`python scripts/ig_login.py`を再実行する。
+- **終了コード2（セッション失効）**：`セッションが失効しています。login.pyを再実行して手動ログインし直してください。`と表示される。`python scripts/login.py`を再実行して手動ログインし直す。自動再ログインは行わない。Instagram側（`ig_user_posts.py`）の場合は`python scripts/ig_login.py`、Threads側（`th_user_posts.py`）の場合は`python scripts/th_login.py`を再実行する。
 - **終了コード4（CAPTCHA／チャレンジ画面検知）**：自動突破は試みない設計。表示されたメッセージに従い、`--headed`オプションを付けて実行し直すなどしてブラウザで手動対応する。
 
 ## 既知の制約
@@ -341,6 +368,7 @@ trend_word, tweet_volume, rank, collected_at
 - **本垢のブックマークは取得不可**：`bookmarks.py`はログイン中のサブ垢自身がブックマークしたものしか取得できない。
 - **X内部API構造変更によるパーサー崩壊の可能性**：GraphQLのオペレーション名・レスポンス構造は非公開かつ予告なく変わる。キー名を決め打ちしない探索や警告スキップである程度耐性を持たせているが、大きな構造変更があれば追従できなくなる可能性がある。
 - **Instagram内部API構造変更・取得範囲**：`ig_user_posts.py`も非公開の内部APIに依存するため、構造変更で取得0件になりうる（投稿らしいノードを再帰探索し、欠けた項目は警告スキップする設計）。ピン留めされた古い投稿は差分判定で新規扱いにならない。キーワード・ハッシュタグ検索は未対応。
+- **Threads内部API構造変更・取得範囲**：`th_user_posts.py`も非公開の内部API・ページ埋め込みJSONに依存するため、構造変更で取得0件になりうる。リポストは元投稿のIDで記録されるため、古い投稿のリポストは差分判定で新規扱いにならない。キーワード検索・返信タブは未対応。
 - **ブックマーク差分取得の抜け漏れ**：`bookmarks.py`の差分判定は投稿IDの大小比較で行っている。ブックマーク一覧はブックマークした順に並ぶため、IDの小さい（＝古い）投稿を後からブックマークした場合、前回取得済み最新IDより小さいと判定されて新規として拾われず、取得漏れが発生しうる。
 
 ## 運用上の注意
@@ -353,4 +381,4 @@ trend_word, tweet_volume, rank, collected_at
 
 本プログラムは配置場所未定のスタンドアロン構成であり、相対パス完結・外部依存最小で作られている。将来、現在の場所とは別のディレクトリに移動されることを想定している。
 
-`.gitignore`では`x_storage_state.json`・`instagram_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する（`media.py`の保存先だけは既定パスの`data/media/`で除外している。`--out`で別の場所に保存する場合はその場所を各自で除外すること）。
+`.gitignore`では`x_storage_state.json`・`instagram_storage_state.json`・`threads_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する（`media.py`の保存先だけは既定パスの`data/media/`で除外している。`--out`で別の場所に保存する場合はその場所を各自で除外すること）。
