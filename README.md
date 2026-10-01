@@ -1,6 +1,6 @@
 # saezuri
 
-X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。
+X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。Instagram・Threads・TikTokの特定アカウントの投稿収集にも対応する。
 
 ## 目次
 
@@ -12,11 +12,16 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [login.py（初回ログイン）](#loginpy初回ログイン)
   - [search.py（キーワード／ハッシュタグ検索）](#searchpyキーワードハッシュタグ検索)
   - [user_tweets.py（特定アカウント投稿追跡）](#user_tweetspy特定アカウント投稿追跡)
+  - [x_profiles.py（アカウントのフォロワー数等取得）](#x_profilespyアカウントのフォロワー数等取得)
+  - [th_profiles.py（Threadsアカウントのフォロワー数等取得）](#th_profilespythreadsアカウントのフォロワー数等取得)
   - [tweet.py（単一ツイート取得）](#tweetpy単一ツイート取得)
   - [trends.py（トレンド把握）](#trendspyトレンド把握)
   - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
   - [digest.py（Markdownダイジェスト生成）](#digestpymarkdownダイジェスト生成)
   - [media.py（収集済みJSONLからの画像ダウンロード）](#mediapy収集済みjsonlからの画像ダウンロード)
+  - [Instagram収集（ig_login.py／ig_user_posts.py）](#instagram収集ig_loginpyig_user_postspy)
+  - [Threads収集（th_login.py／th_user_posts.py）](#threads収集th_loginpyth_user_postspy)
+  - [TikTok収集（tt_login.py／tt_user_posts.py／tt_profiles.py）](#tiktok収集tt_loginpytt_user_postspytt_profilespy)
 - [設定ファイル（config.yaml）](#設定ファイルconfigyaml)
 - [出力ファイルについて](#出力ファイルについて)
 - [トラブルシューティング](#トラブルシューティング)
@@ -148,6 +153,28 @@ python scripts/user_tweets.py --include-replies
 
 結果は`data/raw/user_tweets_<日付>.jsonl`に追記する。ハンドルごとに`state/<handle>_last_id.json`へ前回取得済み最新IDを保存し、それより新しいIDの投稿のみを差分保存する。レートリミット・チャレンジ検知時はその時点までの収集分を保存し、残りのアカウントは処理しない。
 
+### x_profiles.py（アカウントのフォロワー数等取得）
+
+`config.yaml`の`watch_accounts`（または`--handle`）の各アカウントについて`x.com/<handle>`を1回だけ開き、`UserByScreenName`を傍受してフォロワー数・フォロー数・投稿数・表示名・プロフィール文等を取得する。スクロールや再アクセスはしない。
+
+```
+python scripts/x_profiles.py                     # watch_accounts全件
+python scripts/x_profiles.py --handle some_user   # 特定の1アカウントのみ
+```
+
+結果は標準出力に表示し、`data/raw/x_profiles_<日付>.jsonl`に追記する（差分管理なし。実行ごとの時点スナップショット）。このJSONLはポストではないため`digest.py`には渡さない。レートリミット・チャレンジ検知時はそこまでの取得分を保存して中断する（終了コードは他スクリプトと共通。取得できないアカウントがあった場合は1）。
+
+### th_profiles.py（Threadsアカウントのフォロワー数等取得）
+
+`config.yaml`の`threads.watch_accounts`（または`--user`）の各アカウントについて`threads.com/@<username>`を1回だけ開き、ページ埋め込みJSONからフォロワー数（正確値）・表示名・プロフィール文・認証済みか等を取得する。JSONに無い場合のみ画面表示の「フォロワー4.3万人」等から概数を取り、`followers_is_approx`で区別する。スクロールや再アクセスはしない。事前に`th_login.py`でログインしておく。
+
+```
+python scripts/th_profiles.py                    # threads.watch_accounts全件
+python scripts/th_profiles.py --user some_brand  # 特定の1アカウントのみ
+```
+
+結果は標準出力に表示し、`data/raw/th_profiles_<日付>.jsonl`に追記する（差分管理なし。実行ごとの時点スナップショット）。このJSONLはポストではないため`digest.py`には渡さない。レートリミット・チャレンジ検知時はそこまでの取得分を保存して中断する（終了コードは他スクリプトと共通。取得できないアカウントがあった場合は1）。
+
 ### tweet.py（単一ツイート取得）
 
 URLまたはIDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハンドル不明時は`x.com/i/status/<id>`）で開き、`TweetDetail`オペレーションのレスポンスを傍受する。会話スレッド全体やリプライは集めず、指定した1件が見つかった時点で打ち切る（スレッド全体・引用・同一投稿者の他投稿も含めて集めたい場合は`related.py`を使う）。
@@ -251,6 +278,109 @@ python scripts/media.py data/raw/*.jsonl --out data/media/foo --max 50 --dry-run
 - ダウンロードは逐次実行で、1枚ごとに0.5〜2.0秒のランダム待機を挟む（並列化・自動リトライはしない）。**429を受けた場合は即座に中断**し、終了コード`3`で終わる。
 - 終了コードは`0`＝正常、`1`＝入力ファイルが見つからない・保存先が作れない、`3`＝レートリミット（429）検知、のいずれか。
 
+### Instagram収集（ig_login.py／ig_user_posts.py）
+
+Instagramの特定アカウントの投稿を、X側と同じ方式（手動ログインしたセッションの再利用＋内部APIレスポンスの傍受）で収集する。公式Instagram Graph APIは自社ビジネスアカウント以外の投稿本文・反応数を取得できないため採用していない。
+
+**Instagramも利用規約でスクレイピングを禁止しており、X以上にbot検知・アカウント制限が厳しい。**[利用規約リスクについて](#利用規約リスクについて必読)の緩和策（オンデマンド実行・収集専用サブアカウント・手動ログイン・低頻度）をInstagramにも同様に適用すること。
+
+1. 初回・失効時に手動ログインする（X用の`login.py`とはセッションが別。Instagramのサブ垢でログインする）
+   ```
+   python scripts/ig_login.py
+   ```
+   ブラウザでInstagramに手動ログインすると、`sessionid` Cookieの付与を検知して`config.yaml`の`instagram.storage_state_path`（既定: `session/instagram_storage_state.json`）へ保存する（最大5分待機）。ID/PWの自動入力は行わない。
+2. `config.yaml`の`instagram.watch_accounts`に追跡したいユーザー名を列挙し、収集する
+   ```
+   python scripts/ig_user_posts.py                     # instagram.watch_accounts全件
+   python scripts/ig_user_posts.py --user some_brand   # 特定の1アカウントのみ
+   ```
+
+| オプション（ig_user_posts.py） | 説明 |
+|---|---|
+| `--user` | 特定の1アカウントだけ実行（`@`は不要。省略時は`instagram.watch_accounts`全件） |
+| `--max` | 1アカウントあたりの取得上限件数（省略時は`config.yaml`の`max_items`） |
+| `--config` | 設定ファイルのパス（既定: `config.yaml`） |
+| `--browser` | 起動するブラウザエンジン（既定: `config.yaml`の`browser`。`ig_login.py`と同じ値を使うこと） |
+| `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+
+- `instagram.com/<ユーザー名>/`を開いてスクロールし、プロフィール・フィード系の内部API（`web_profile_info`、`graphql/query`等）のレスポンスから投稿を抽出する。スクロール間の待機・上限件数・新規なし3回での停止はX側と共通（`wait_seconds`・`max_items`）。
+- 結果は`data/raw/instagram_posts_<日付>.jsonl`に追記する。ポストの共通スキーマで保存し、`url`は`https://www.instagram.com/p/<ショートコード>/`、`text`はキャプション、`like_count`はいいね数（非表示設定の投稿は0）、`reply_count`はコメント数、`repost_count`／`quote_count`は常に0、`source_query`は`instagram:<ユーザー名>`。カルーセル投稿は`media`に全画像・動画を並べる。ストーリーズ（ハイライト含む）は対象外。
+- 作者が対象アカウント本人の投稿のみ保存する（プロフィールページのサイドバーのおすすめ・広告等に含まれる他人の投稿は除外する。大文字小文字は区別しない）。
+- 差分管理は`state/instagram_<ユーザー名>_last_id.json`（InstagramのメディアIDは投稿時刻順に増えるため、X側と同じくID大小比較で新規判定する）。
+- 共通スキーマなので、`digest.py`・`media.py`にそのまま渡せる（`media.py`は`photo`のみダウンロードする。InstagramのCDN URLは署名付きで時間が経つと失効するため、収集後早めに実行すること）。
+- 終了コードはX側と同じ契約（`0`＝正常／`1`＝設定・環境エラー／`2`＝セッション失効／`3`＝レートリミット（429）／`4`＝チャレンジ画面・確認要求）。3・4（および収集途中の失効による2）でも検知時点までの収集分は保存してから終了し、残りのアカウントは処理しない。
+- キーワード・ハッシュタグ検索には対応していない（Instagram側のハッシュタグページは仕様変更が多く、安定した傍受対象がないため）。
+
+### Threads収集（th_login.py／th_user_posts.py）
+
+Threadsの特定アカウントの投稿を、Instagram収集と同じ方式（手動ログインしたセッションの再利用＋内部APIレスポンスの傍受）で収集する。公式Threads APIは原則として自分のアカウントの投稿しか扱えないため採用していない。ThreadsもMetaの利用規約でスクレイピングを禁止しているため、[利用規約リスクについて](#利用規約リスクについて必読)の緩和策を同様に適用すること。
+
+1. 初回・失効時に手動ログインする（X用・Instagram用とはセッションが別。Threads（Instagramアカウント連携）のサブ垢でログインする）
+   ```
+   python scripts/th_login.py
+   ```
+   ブラウザでThreadsに手動ログインすると、`threads.com`の`sessionid` Cookieの付与を検知して`config.yaml`の`threads.storage_state_path`（既定: `session/threads_storage_state.json`）へ保存する（最大5分待機）。ID/PWの自動入力は行わない。
+2. `config.yaml`の`threads.watch_accounts`に追跡したいユーザー名を列挙し、収集する
+   ```
+   python scripts/th_user_posts.py                     # threads.watch_accounts全件
+   python scripts/th_user_posts.py --user some_brand   # 特定の1アカウントのみ
+   ```
+
+オプション（`--user`／`--max`／`--config`／`--browser`／`--headed`）は`ig_user_posts.py`と同じ（`--user`の省略時は`threads.watch_accounts`全件）。
+
+- `threads.com/@<ユーザー名>`を開き、初回表示分はページに埋め込まれたJSONから、スクロールで追加読み込みされる分は内部API（`graphql/query`等）のレスポンスから投稿を抽出する。待機・上限件数・停止条件はX側と共通（`wait_seconds`・`max_items`）。
+- 結果は`data/raw/threads_posts_<日付>.jsonl`に追記する。ポストの共通スキーマで保存し、`url`は`https://www.threads.com/@<投稿者>/post/<ショートコード>`、`like_count`はいいね数、`reply_count`は直接の返信数、`repost_count`／`quote_count`はリポスト数・引用数、`quoted_id`は引用元投稿のID、`source_query`は`threads:<ユーザー名>`。連投（スレッド）は1投稿ずつ別レコードになる。対象アカウントのプロフィールに並ぶ他人の投稿（リポスト）は`is_repost: true`になる。
+- 差分管理は`state/threads_<ユーザー名>_last_id.json`（ID大小比較で新規判定）。
+- `digest.py`・`media.py`にそのまま渡せる。終了コードの契約・ブロック検知時の挙動は`ig_user_posts.py`と同じ。
+- キーワード検索・返信タブの収集には対応していない。
+
+### TikTok収集（tt_login.py／tt_user_posts.py／tt_profiles.py）
+
+TikTokの特定アカウントの投稿を、Instagram・Threads収集と同じ方式（手動ログインしたセッションの再利用＋内部APIレスポンスの傍受）で収集する。TikTokも利用規約でスクレイピングを禁止しているため、[利用規約リスクについて](#利用規約リスクについて必読)の緩和策を同様に適用すること。**TikTokは未ログインでもプロフィールを開くとCAPTCHA（スライダー／パズル）が出やすい。** 検知したら突破を試みず、検知時点までの収集分を保存して終了コード4で終える。
+
+1. 初回・失効時に手動ログインする（他SNSとはセッションが別。サブ垢でログインする。ログイン中にCAPTCHAが出たら手動で解く）
+   ```
+   python scripts/tt_login.py
+   ```
+   `tiktok.com`の`sessionid` Cookieの付与を検知して`config.yaml`の`tiktok.storage_state_path`（既定: `session/tiktok_storage_state.json`）へ保存する（最大5分待機）。ID/PWの自動入力は行わない。
+2. `config.yaml`の`tiktok.watch_accounts`に追跡したいユーザー名（`@`の後ろのuniqueId）を列挙し、収集する
+   ```
+   python scripts/tt_user_posts.py                     # tiktok.watch_accounts全件
+   python scripts/tt_user_posts.py --user some_brand   # 特定の1アカウントのみ
+   python scripts/tt_profiles.py                       # フォロワー数・いいね合計・動画数等の取得
+   ```
+
+オプション（`--user`／`--max`／`--config`／`--browser`／`--headed`）は`ig_user_posts.py`と同じ（`tt_profiles.py`は`--max`なし）。
+
+- `tiktok.com/@<ユーザー名>`を開き、スクロールで読み込まれる投稿一覧API（`/api/post/item_list/`）のレスポンスから動画を抽出する。待機・上限件数・停止条件はX側と共通。
+- 結果は`data/raw/tiktok_posts_<日付>.jsonl`に追記する。ポストの共通スキーマで保存し、`url`は`https://www.tiktok.com/@<投稿者>/video/<動画ID>`、`text`は動画の説明文、`like_count`はいいね数、`reply_count`はコメント数、`repost_count`はシェア数、`quote_count`は常に0、`media`はカバー画像（`photo`）と動画URL（`video`。フォトモードの投稿は各画像を`photo`）、`source_query`は`tiktok:<ユーザー名>`。再生数・保存数はスキーマに項目がないため保存しない。対象アカウント以外の投稿は除外する。
+- 差分管理は`state/tiktok_<ユーザー名>_last_id.json`（動画IDの大小比較。ピン留めされた古い投稿は新規扱いにならない）。
+- `tt_profiles.py`は`data/raw/tt_profiles_<日付>.jsonl`に追記する（差分管理なし）。項目は`handle, user_id, name, description, followers_count, following_count, likes_count, videos_count, followers_source, collected_at, is_verified, is_private, url, profile_url`。ポストではないため`digest.py`には渡さない。
+- CAPTCHAは「CAPTCHA配信への通信」「`/captcha`URLへの遷移」「画面上のCAPTCHA要素」のいずれかで検知する。ログイン判定はTikTokが未ログインでも閲覧できるため`sessionid` Cookieの有無・期限のみで行う（ログイン画面へ飛ばされたら収集途中でも失効として終了コード2）。
+
+#### 自分のChromeにCDPで接続して収集する（`--cdp`）
+
+`tt_login.py`のログイン試行が上限に達してstorage_stateを作れない場合などに、管理人が自分で起動・ログイン済みのChromeへCDP（Chrome DevTools Protocol）で接続して`tt_user_posts.py`／`tt_profiles.py`を実行できる。
+
+1. 専用プロファイルでChromeを起動する（デバッグポート付き）
+   ```
+   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\chrome-saezuri-profile
+   ```
+   最近のChromeは**既定プロファイルではデバッグポートが使えない**ため、`--user-data-dir`で専用プロファイルのフォルダを必ず指定する（初回は空のプロファイルで起動する）。
+2. そのChromeでTikTokを開き、手動でログインする（ログイン情報は専用プロファイルに残るので次回以降は不要）。
+3. 収集する
+   ```
+   python scripts/tt_profiles.py --cdp http://127.0.0.1:9222
+   python scripts/tt_user_posts.py --cdp http://127.0.0.1:9222
+   ```
+
+- `--cdp`省略時は`config.yaml`の`tiktok.cdp_url`、それも空なら従来のstorage_state方式（`tt_login.py`）で動く。
+- 接続先Chromeの既存コンテキストに新しいタブを開いて使い、終了時にそのタブだけ閉じる。Chrome本体は閉じず、storage_stateも保存しない。
+- ログイン検証は、そのChromeのCookieに有効期限内の`sessionid`（tiktok.com）があるかで行う。無ければ終了コード2。接続できない（Chrome未起動・ポート違い）場合は終了コード1。
+- 自動ログイン・CAPTCHA突破・自動リトライは行わない。CAPTCHA検知時は即中断して終了コード4。
+- `digest.py`・`media.py`にそのまま渡せる（`media.py`で保存されるのはカバー画像のみ）。終了コードの契約は`ig_user_posts.py`と同じ。
+- キーワード検索・リポスト／いいね一覧は未対応。
+
 ## 設定ファイル（config.yaml）
 
 | キー | 内容 |
@@ -265,13 +395,20 @@ python scripts/media.py data/raw/*.jsonl --out data/media/foo --max 50 --dry-run
 | `output.media_dir` | `media.py`がダウンロードした画像の出力先ディレクトリ（既定: `data/media`。この下に入力JSONLごとのサブディレクトリを作る） |
 | `session.storage_state_path` | 手動ログイン結果（`storage_state`）の保存先（既定: `session/x_storage_state.json`） |
 | `browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `chromium`。不正値は`chromium`にフォールバックし警告を表示） |
+| `instagram.watch_accounts` | `ig_user_posts.py`が追跡対象にするInstagramユーザー名のリスト（`@`は付けない） |
+| `instagram.storage_state_path` | `ig_login.py`の手動ログイン結果の保存先（既定: `session/instagram_storage_state.json`） |
+| `threads.watch_accounts` | `th_user_posts.py`が追跡対象にするThreadsユーザー名のリスト（`@`は付けない） |
+| `threads.storage_state_path` | `th_login.py`の手動ログイン結果の保存先（既定: `session/threads_storage_state.json`） |
+| `tiktok.watch_accounts` | `tt_user_posts.py`／`tt_profiles.py`が追跡対象にするTikTokユーザー名のリスト（`@`は付けない） |
+| `tiktok.storage_state_path` | `tt_login.py`の手動ログイン結果の保存先（既定: `session/tiktok_storage_state.json`） |
+| `tiktok.cdp_url` | 管理人のChromeにCDPで接続する際の接続先（例: `http://127.0.0.1:9222`）。`--cdp`省略時の既定で、空ならstorage_state方式 |
 | `browser_executable_path` | `brave`使用時のみ必要。Brave実行ファイルの絶対パス。空／未指定なら一般的なインストール場所を自動探索する |
 
 いずれもプロジェクトルートからの相対パスで指定する（`browser_executable_path`は絶対パス）。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要（[セットアップ](#セットアップ)参照）。`brave`使用時、自動検出（`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`等の一般的なインストール場所を順に確認）に失敗する場合は`browser_executable_path`に絶対パスを指定すること。
 
 ## 出力ファイルについて
 
-**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`）は以下の共通スキーマ。
+**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`/`ig_user_posts.py`/`th_user_posts.py`/`tt_user_posts.py`）は以下の共通スキーマ。
 
 ```
 id, url, author_handle, author_name, created_at, text, article_title, article_text, lang,
@@ -285,11 +422,21 @@ media(type/url配列), is_repost, quoted_id, source_query, collected_at
 trend_word, tweet_volume, rank, collected_at
 ```
 
+アカウントのプロフィール（`x_profiles.py`）も別スキーマ。
+
+```
+handle, user_id, name, description, followers_count, following_count, tweet_count, media_count,
+location, url, created_at, is_blue_verified, verified_type, protected, category, profile_url, collected_at
+```
+
 **既読・差分管理（`state/`）**
 
 - `state/seen_ids.json`：`search.py`が使うグローバルな既読ID一覧
 - `state/<handle>_last_id.json`：`user_tweets.py`がハンドルごとに保存する前回取得済み最新ID
 - `state/bookmarks_last_id.json`：`bookmarks.py`が保存する前回取得済み最新ID
+- `state/instagram_<ユーザー名>_last_id.json`：`ig_user_posts.py`がアカウントごとに保存する前回取得済み最新ID
+- `state/threads_<ユーザー名>_last_id.json`：`th_user_posts.py`がアカウントごとに保存する前回取得済み最新ID
+- `state/tiktok_<ユーザー名>_last_id.json`：`tt_user_posts.py`がアカウントごとに保存する前回取得済み最新ID
 
 **画像（`media.py`の出力）**：既定で`data/media/<入力JSONLのファイル名>/<post_id>_<連番2桁>.<拡張子>`。`.gitignore`で`data/media/`を除外しているためリポジトリには含まれない。
 
@@ -299,13 +446,16 @@ trend_word, tweet_volume, rank, collected_at
 
 - **取得0件が続く**：Xの内部API構造変更が疑われる。コンソールの警告ログ（`instructionsが見つかりません(API構造変更の可能性)`等）を確認する。パーサーはベストエフォート実装のため、構造変更時は例外を投げず警告してスキップする設計になっている。
 - **終了コード3（429／レートリミット検知）**：クールダウンして時間を置いてから再実行する。すぐに再実行しない。
-- **終了コード2（セッション失効）**：`セッションが失効しています。login.pyを再実行して手動ログインし直してください。`と表示される。`python scripts/login.py`を再実行して手動ログインし直す。自動再ログインは行わない。
+- **終了コード2（セッション失効）**：`セッションが失効しています。login.pyを再実行して手動ログインし直してください。`と表示される。`python scripts/login.py`を再実行して手動ログインし直す。自動再ログインは行わない。Instagram側（`ig_user_posts.py`）の場合は`python scripts/ig_login.py`、Threads側（`th_user_posts.py`）の場合は`python scripts/th_login.py`、TikTok側（`tt_user_posts.py`）の場合は`python scripts/tt_login.py`を再実行する。
 - **終了コード4（CAPTCHA／チャレンジ画面検知）**：自動突破は試みない設計。表示されたメッセージに従い、`--headed`オプションを付けて実行し直すなどしてブラウザで手動対応する。
 
 ## 既知の制約
 
 - **本垢のブックマークは取得不可**：`bookmarks.py`はログイン中のサブ垢自身がブックマークしたものしか取得できない。
 - **X内部API構造変更によるパーサー崩壊の可能性**：GraphQLのオペレーション名・レスポンス構造は非公開かつ予告なく変わる。キー名を決め打ちしない探索や警告スキップである程度耐性を持たせているが、大きな構造変更があれば追従できなくなる可能性がある。
+- **Instagram内部API構造変更・取得範囲**：`ig_user_posts.py`も非公開の内部APIに依存するため、構造変更で取得0件になりうる（投稿らしいノードを再帰探索し、欠けた項目は警告スキップする設計）。ピン留めされた古い投稿は差分判定で新規扱いにならない。キーワード・ハッシュタグ検索は未対応。
+- **Threads内部API構造変更・取得範囲**：`th_user_posts.py`も非公開の内部API・ページ埋め込みJSONに依存するため、構造変更で取得0件になりうる。リポストは元投稿のIDで記録されるため、古い投稿のリポストは差分判定で新規扱いにならない。キーワード検索・返信タブは未対応。
+- **TikTok内部API構造変更・CAPTCHA**：`tt_user_posts.py`／`tt_profiles.py`も非公開の内部API（`/api/post/item_list/`・`/api/user/detail/`）・ページ埋め込みJSONに依存し、構造変更で取得0件になりうる。CAPTCHAが出やすく、出た時点で収集を中断する（突破しない）。ピン留めされた古い投稿は差分判定で新規扱いにならない。再生数は保存しない。
 - **ブックマーク差分取得の抜け漏れ**：`bookmarks.py`の差分判定は投稿IDの大小比較で行っている。ブックマーク一覧はブックマークした順に並ぶため、IDの小さい（＝古い）投稿を後からブックマークした場合、前回取得済み最新IDより小さいと判定されて新規として拾われず、取得漏れが発生しうる。
 
 ## 運用上の注意
@@ -318,4 +468,4 @@ trend_word, tweet_volume, rank, collected_at
 
 本プログラムは配置場所未定のスタンドアロン構成であり、相対パス完結・外部依存最小で作られている。将来、現在の場所とは別のディレクトリに移動されることを想定している。
 
-`.gitignore`では`x_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する（`media.py`の保存先だけは既定パスの`data/media/`で除外している。`--out`で別の場所に保存する場合はその場所を各自で除外すること）。
+`.gitignore`では`x_storage_state.json`・`instagram_storage_state.json`・`threads_storage_state.json`・`seen_ids.json`・`*_last_id.json`・`*.jsonl`・`state/`など、セッションファイル・生データ・既読管理ファイルをパス指定なしのファイル名列挙で除外している。将来別の場所に移動しても同名パターンでの除外がそのまま機能する（`media.py`の保存先だけは既定パスの`data/media/`で除外している。`--out`で別の場所に保存する場合はその場所を各自で除外すること）。

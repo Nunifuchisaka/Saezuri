@@ -33,6 +33,30 @@ session:
 # bot検知リスクが上がるため、同じ値を使うこと。
 browser: brave # chromium
 
+# Instagram収集(ig_login.py / ig_user_posts.py)用の設定。X用のセッションとは別ファイルで管理する。
+instagram:
+  # 追跡対象のInstagramユーザー名(@は付けない)
+  # 例: watch_accounts: ["some_brand", "another_brand"]
+  watch_accounts: []
+  storage_state_path: session/instagram_storage_state.json  # ig_login.pyの手動ログイン結果の保存先
+
+# Threads収集(th_login.py / th_user_posts.py)用の設定。X用・Instagram用のセッションとは別ファイルで管理する。
+threads:
+  # 追跡対象のThreadsユーザー名(@は付けない)
+  # 例: watch_accounts: ["some_brand", "another_brand"]
+  watch_accounts: []
+  storage_state_path: session/threads_storage_state.json  # th_login.pyの手動ログイン結果の保存先
+
+# TikTok収集(tt_login.py / tt_user_posts.py / tt_profiles.py)用の設定。他SNS用のセッションとは別ファイルで管理する。
+tiktok:
+  # 追跡対象のTikTokユーザー名(uniqueId。@は付けない)
+  # 例: watch_accounts: ["some_brand", "another_brand"]
+  watch_accounts: []
+  storage_state_path: session/tiktok_storage_state.json  # tt_login.pyの手動ログイン結果の保存先
+  # 管理人が起動・ログイン済みのChromeにCDPで接続する場合の接続先(--cdp省略時の既定)。空ならstorage_state方式
+  # 例: cdp_url: http://127.0.0.1:9222
+  cdp_url:
+
 # Brave使用時のみ必要。Brave実行ファイルの絶対パス。
 # 空/未指定なら一般的なインストール場所(下記例など)を自動探索する。
 # 他の環境に持って行く場合や自動検出に失敗する場合はここに絶対パスを指定する。

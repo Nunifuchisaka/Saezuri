@@ -47,7 +47,13 @@ TWEET_OPERATIONS = (
 
 # トレンド系のオペレーション名は正確な名称が変動しうる(ExplorePage等)ため、
 # 完全一致ではなく「これらの語を含むか」で緩めに判定する
-TREND_OPERATION_KEYWORDS = ("ExplorePage", "Explore")
+# Xがオペレーション名を差し替えた場合の別名(旧名指定でも新名のレスポンスを捕捉する)。
+# 2026-10に UserTweets のプロフィール投稿一覧が UserOriginalsTimeline で届くことを確認(ペイロード構造は同等)
+OPERATION_ALIASES = {
+    "UserTweets": ("UserOriginalsTimeline",),
+}
+
+TREND_OPERATION_KEYWORDS =("ExplorePage", "Explore")
 
 DEFAULT_WAIT_SECONDS_RANGE = (3.0, 15.0)
 DEFAULT_MAX_ITEMS = 100
@@ -127,6 +133,8 @@ class GraphQLCapture:
         operation_keywords: Sequence[str] = (),
     ) -> None:
         self._operations = set(operations)
+        for operation in operations:
+            self._operations.update(OPERATION_ALIASES.get(operation, ()))
         self._operation_keywords = tuple(operation_keywords)
         self._pending: list[tuple[str, Response]] = []
         self._rate_limited = False

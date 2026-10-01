@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 概要
 
-saezuriは、X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。公式X APIは有料のため採用せず、Playwrightのブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。
+saezuriは、X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマーク、およびInstagram・Threadsの特定アカウントの投稿をPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。公式X APIは有料のため採用せず、Playwrightのブラウザ自動操作でXの内部GraphQL APIレスポンスを傍受する方式（スクレイピング）を取っている。
 
 台本・記事本体への取捨選択・執筆は本ツールの範囲外（vrchat-video-script／note-vrchat-guideスキル側の担当）。
 
@@ -25,13 +25,22 @@ playwright install chromium   # config.yamlのbrowserでfirefox/webkitを使う�
 python scripts/login.py                                          # 初回・失効時の手動ログイン
 python scripts/search.py --query "VRChat アップデート" --max 100  # キーワード検索
 python scripts/user_tweets.py                                     # watch_accounts全件の投稿追跡
+python scripts/x_profiles.py                                      # watch_accountsのフォロワー数等プロフィール取得
+python scripts/th_profiles.py                                     # threads.watch_accounts全件のフォロワー数等プロフィール取得
 python scripts/trends.py                                          # トレンド取得
 python scripts/bookmarks.py                                       # サブ垢自身のブックマーク取得
 python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Markdownダイジェスト生成
 python scripts/media.py data/raw/related_20260725_003.jsonl       # 収集済みJSONLから画像ダウンロード
+python scripts/ig_login.py                                        # Instagramの初回・失効時の手動ログイン
+python scripts/ig_user_posts.py                                   # instagram.watch_accounts全件の投稿追跡
+python scripts/th_login.py                                        # Threadsの初回・失効時の手動ログイン
+python scripts/th_user_posts.py                                   # threads.watch_accounts全件の投稿追跡
+python scripts/tt_login.py                                        # TikTokの初回・失効時の手動ログイン
+python scripts/tt_user_posts.py                                   # tiktok.watch_accounts全件の投稿追跡(CAPTCHA検知で即中断)
+python scripts/tt_profiles.py                                     # tiktok.watch_accounts全件のフォロワー数等プロフィール取得
 ```
 
-`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジックを検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
+`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`・`tests/test_threads_parse.py`は`instagram.py`・`threads.py`の投稿正規化ロジックを検証する。`tests/test_tiktok_parse.py`・`test_tt_profiles_parse.py`・`test_tt_user_posts.py`は`tiktok.py`・`tt_profiles.py`・`tt_user_posts.py`の正規化・CAPTCHA検知ロジックを合成データで検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
 
 ## 運用上の制約（コード変更時に踏まえること）
 
@@ -60,6 +69,15 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 
 起点投稿・引用元投稿いずれかがX Articleへのリンクの場合、記事タイトル・本文も`Post.article_title`/`Post.article_text`として同時に保存・標準出力表示される。この解析自体は`capture.py`の`_parse_tweet_result`に組み込まれているため、`tweet.py`専用ではなく`search.py`等の収集モジュールで収集した投稿にも同様に適用される（引用元投稿の取得自体が`tweet.py`専用なのは変わらない）。標準出力の表示は`tweet.py`の`_print_post`ヘルパーに集約した（起点投稿・引用元投稿の表示コードの重複を解消）。
 
+### `scripts/x_profiles.py`（アカウントのプロフィール・フォロワー数取得）
+
+`x.com/<handle>`を1ハンドルにつき1回だけ開き（スクロールなし・リトライなし）、`UserByScreenName`を傍受して`XProfile`（フォロワー数・フォロー数・投稿数・表示名・プロフィール文等）へ正規化する。`watch_accounts`全件、または`--handle`指定。`parse_profile_payload`は「`rest_id`とscreen_nameを持つdict」を再帰探索で探し、2026-10時点の実機構造（`relationship_counts.followers/following`、`tweet_counts.tweets`、`core.name`、`profile_bio.description`）を主に、旧形式の`legacy.followers_count`等へフォールバックする。`legacy`配下にはフォロワー数が無いので注意。`UserByScreenName`だけを捕捉対象にする（サイドバー系のレスポンスには他人のフォロワー数が入るため捕捉しない）。`data/raw/x_profiles_<日付>.jsonl`に追記（差分管理なし）。429/チャレンジ検知時は取得済み分を保存して即中断し、終了コード契約は他と共通（取得できないアカウントがあれば1）。出力はPost/TrendEntryではないため`digest.py`には渡さない。
+
+
+### `scripts/th_profiles.py`（Threadsアカウントのプロフィール・フォロワー数取得）
+
+`threads.com/@<username>`を1ユーザーにつき1回だけ開き（スクロールなし・リトライなし）、ページ埋め込みJSONの`user`ノード（`username`と`follower_count`を持つdictを再帰探索）から`ThProfile`（フォロワー数・表示名・プロフィール文・認証済み・非公開・リンク）へ正規化する。`threads.watch_accounts`全件、または`--user`指定。フォロワー数は埋め込みJSONの`follower_count`が正確値（`followers_is_approx=False`、`followers_source=embedded_json`）。画面表示の「フォロワー4.3万人」は丸め表示なので、JSONに無い場合だけ`parse_follower_text`で表示テキストから概数に変換し`followers_is_approx=True`/`followers_source=page_text`で区別する。注意：`threads.py`の`load_embedded_payloads`は`text_post_app_info`を含むJSONしか返さず、投稿0件のアカウントではプロフィールJSONが落ちるため、本モジュールは`follower_count`を目印にした専用の読み出しを持つ。`data/raw/th_profiles_<日付>.jsonl`に追記（差分管理なし）。429/チャレンジ/失効検知時は取得済み分を保存して即中断し、終了コード契約は他と共通（取得できないアカウントがあれば1）。出力はPost/TrendEntryではないため`digest.py`には渡さない。
+
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 
 各スクリプトは同一パターンで構成される：
@@ -75,6 +93,35 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 - `user_tweets.py`：`data/raw/user_tweets_<日付>.jsonl`に追記。ハンドルごとに`state/<handle>_last_id.json`で差分管理。
 - `trends.py`：`data/raw/trends_<日付>.jsonl`に追記。`interest_keywords`によるフィルタが既定でON（`--no-filter`で解除）。
 - `bookmarks.py`：`data/raw/bookmarks_<日付>.jsonl`に追記。`state/bookmarks_last_id.json`で差分管理。ログイン中のサブ垢自身のブックマークしか取得できない制約あり（ID大小比較での差分判定のため、古い投稿を後からブックマークすると取得漏れが起こりうる。既知の制約としてREADME参照）。
+
+### Instagram収集（`scripts/instagram.py` / `ig_login.py` / `ig_user_posts.py`）
+
+X側と同じ方針（手動ログインのstorage_state再利用・内部APIレスポンス傍受・オンデマンド実行・自動リトライ/自動突破なし）でInstagramの特定アカウントの投稿を収集する。
+
+- **`instagram.py`**（共通基盤）：Instagram用storage_state（`config.yaml`の`instagram.storage_state_path`、X用とは別ファイル）のロードと、`sessionid` Cookie＋ログイン画面リダイレクト有無によるログイン検証（`require_instagram_login`、失効時`SessionExpiredError`）。`InstagramCapture`は`GraphQLCapture`を継承し、URLで`web_profile_info`/`feed/user`/`graphql/query`/`api/graphql`を捕捉する。429でレートリミット、本文の`checkpoint_required`等やURLの`/challenge`等でチャレンジ、ログイン画面遷移で失効を検知する。`capture.scroll_and_collect`にそのまま渡せる。
+- **`parse_instagram_payload`**：ルートキーを決め打ちせず、v1形式（`code`+`taken_at`+`pk`/`id`）と旧GraphQL形式（`shortcode`+`taken_at_timestamp`）の投稿ノードを再帰探索で拾って`Post`へ正規化する。投稿ノードの内側（カルーセル子要素）には潜らない。ストーリーズ（`product_type == "story"`）は除外。欠けたキーは`logger.warning()`でその1件だけスキップする。`Post`への対応は`url`＝`/p/<code>/`、`reply_count`＝コメント数、`repost_count`/`quote_count`＝0、`source_query`＝`instagram:<ユーザー名>`。
+- **`ig_login.py`**：`login.py`のInstagram版。`sessionid` Cookie付与をポーリングで待ってstorage_stateを保存する。自動入力は追加しない。
+- **`ig_user_posts.py`**：`user_tweets.py`と同じ構成・終了コード契約。`data/raw/instagram_posts_<日付>.jsonl`に追記し、`state/instagram_<ユーザー名>_last_id.json`で差分管理（`user_tweets.py`の`filter_new_posts`/`max_post_id`/`dedupe_by_id`を再利用）。収集途中の失効（ログイン画面遷移）もそこまでの分を保存してから終了コード2で終える。作者が対象アカウント本人の投稿のみ保存する（プロフィールページのサイドバー等に出る他人の投稿は`filter_by_author`で`scroll_and_collect`に渡す前に除外し、件数・差分管理の最大IDにも含めない）。
+
+### Threads収集（`scripts/threads.py` / `th_login.py` / `th_user_posts.py`）
+
+ThreadsはInstagramと同じ基盤で投稿ノードもv1形式とほぼ同じため、`instagram.py`を再利用する（Instagram収集と同じ方針・同じ終了コード契約）。
+
+- **`threads.py`**（共通基盤）：Threads用storage_state（`threads.storage_state_path`）のロードと、`threads.com`/`threads.net`の`sessionid` Cookieによるログイン検証（`require_threads_login`）。`ThreadsCapture`は`InstagramCapture`を継承し、`endpoint_name`/`is_login_url`/`is_challenge_url`をThreads用に差し替えている（`InstagramCapture`側はこれらのメソッド経由で判定するため、判定条件を変える場合はオーバーライドで行う）。
+- **初回表示分はAPIではなくページ埋め込みJSON**（`<script type="application/json">`）で届くため、`load_embedded_payloads`で取り出し`ThreadsCapture.inject()`で次の`drain()`に載せてから`scroll_and_collect`に入る。
+- **`parse_threads_payload`**：`text_post_app_info`を持つv1形式の投稿ノードを再帰探索で拾う（内側の引用元投稿・カルーセル子要素には潜らない）。メディア抽出・時刻変換は`instagram.py`の`_parse_v1_media_list`/`_timestamp_to_iso`等を流用。`reply_count`＝`direct_reply_count`、`repost_count`/`quote_count`＝`text_post_app_info`の値、`quoted_id`＝`share_info.quoted_post`のpk、投稿者が対象アカウントと異なる投稿は`is_repost=True`。
+- **`th_login.py`** / **`th_user_posts.py`**：`ig_login.py`/`ig_user_posts.py`と同構成。`data/raw/threads_posts_<日付>.jsonl`に追記し、`state/threads_<ユーザー名>_last_id.json`で差分管理。
+
+### TikTok収集（`scripts/tiktok.py` / `tt_login.py` / `tt_user_posts.py` / `tt_profiles.py`）
+
+Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未確認**（APIのURL・JSONキーは公開情報・既知の構造に基づく想定。管理人のログイン後に実機で突き合わせること）。
+
+- **`tiktok.py`**（共通基盤）：TikTok用storage_state（`tiktok.storage_state_path`）のロードと`sessionid` Cookie（有効期限つき）によるログイン検証（`require_tiktok_login`）。TikTokは未ログインでも閲覧できCAPTCHAリスクがあるため、検証用のページ遷移はせずCookieのみで判定する。`TikTokCapture`は`InstagramCapture`を継承し、捕捉対象は`/api/post/item_list/`（投稿一覧）と`/api/user/detail/`（プロフィール）。**CAPTCHAは「`/captcha/`配信への通信」「`/captcha`URL遷移」「`CAPTCHA_SELECTORS`のDOM要素」のいずれかで検知して`ChallengeDetectedError`**（突破・回避コードは書かない）。ログイン画面遷移は`SessionExpiredError`、429は`RateLimitedError`。
+- **`parse_tiktok_payload`**：`id`+`createTime`+`video`/`imagePost`/`stats`を持つdictを再帰探索で拾う（内側には潜らない）。`like_count`＝`diggCount`、`reply_count`＝`commentCount`、`repost_count`＝`shareCount`、`quote_count`＝0、`text`＝`desc`、`lang`＝`textLanguage`。`stats`が無ければ`statsV2`（文字列）を読む。メディアはフォトモード（`imagePost.images`）なら各画像を`photo`、それ以外は`originCover`>`cover`>`dynamicCover`の最初の1件を`photo`＋`playAddr`/`downloadAddr`を`video`。再生数・保存数はPostスキーマに無いため保持しない（`schema.py`は拡張しない方針）。`author.uniqueId`が無い投稿は警告してスキップ。
+- **`tt_login.py`** / **`tt_user_posts.py`**：`th_login.py`/`th_user_posts.py`と同構成（埋め込みJSON注入は無し）。`filter_by_author`は`ig_user_posts.py`から流用。`data/raw/tiktok_posts_<日付>.jsonl`に追記し、`state/tiktok_<ユーザー名>_last_id.json`で差分管理。
+- **`tt_profiles.py`**：`th_profiles.py`相当。埋め込みJSON（`userInfo`）または`user_detail`APIからフォロワー数・フォロー数・いいね合計（`heartCount`）・動画数を取り`data/raw/tt_profiles_<日付>.jsonl`に追記（差分管理なし）。概数フォールバック（画面テキスト解析）は実装していない。
+
+**CDP接続（`--cdp`）**：`tt_user_posts.py`/`tt_profiles.py`は`--cdp http://127.0.0.1:9222`（省略時は`config.yaml`の`tiktok.cdp_url`、空ならstorage_state方式）で、管理人が自分で起動・ログイン済みのChromeに`connect_over_cdp`で接続できる(tt_login.pyの試行上限対策)。共通ヘルパーは`session.py`の`resolve_cdp_url`/`connect_cdp`/`CdpConnectionError`、TikTok側の入口は`tiktok.py`の`open_tiktok_context`(ログイン検証込みのcontextマネージャ)。既存の`contexts[0]`に新規タブを開いて使い、閉じるのはタブだけ(Chrome本体は閉じない・storage_stateは保存しない)。ログイン検証は`sessionid` Cookieの有効期限判定(無ければ終了コード2)、接続失敗は終了コード1。起動例: `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>`で起動→TikTokにログイン→`python scripts/tt_profiles.py --cdp http://127.0.0.1:9222`。**最近のChromeは既定プロファイルではデバッグポートが使えないため、`--user-data-dir`での専用プロファイル指定が必須。** CAPTCHA検知で即中断(終了コード4)・自動ログイン/突破/リトライなしの方針は不変。単体テストは`tests/test_cdp.py`。実機未確認。
 
 ### `digest.py`（収集系と非依存）
 
@@ -93,7 +140,7 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 
 ## 設定ファイル（`config.yaml`）
 
-`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
+`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`instagram.watch_accounts`/`instagram.storage_state_path`（Instagram収集用）、`threads.watch_accounts`/`threads.storage_state_path`（Threads収集用）、`tiktok.watch_accounts`/`tiktok.storage_state_path`（TikTok収集用）、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
 
 ## 配置・Git管理について
 

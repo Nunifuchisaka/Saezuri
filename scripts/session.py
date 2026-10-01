@@ -44,11 +44,45 @@ class SessionExpiredError(RuntimeError):
     """ログイン状態の検証に失敗した(セッション失効)ことを表す例外"""
 
 
+class CdpConnectionError(RuntimeError):
+    """CDP(--remote-debugging-port)での既存Chromeへの接続に失敗したことを表す例外"""
+
+
 def load_config(path: str | Path = "config.yaml") -> dict:
     """config.yamlを読み込んで辞書として返す。"""
     path = Path(path)
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def resolve_cdp_url(cli_value: Optional[str], section: Optional[dict]) -> Optional[str]:
+    """CDP接続先URLを決める。コマンドライン指定 > configセクションのcdp_url > None(CDPを使わない)。"""
+    for value in (cli_value, (section or {}).get("cdp_url")):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def connect_cdp(playwright, cdp_url: str):
+    """起動済みChromeにCDPで接続し、(browser, 既存context)を返す。
+
+    接続失敗・contextが無い場合はCdpConnectionError(日本語メッセージ)を送出する。
+    呼び出し側はbrowser.close()を呼ばないこと(管理人のChrome自体を閉じないため)。
+    """
+    try:
+        browser = playwright.chromium.connect_over_cdp(cdp_url)
+    except Exception as exc:
+        raise CdpConnectionError(
+            f"Chromeにデバッグポートで接続できません: {cdp_url}\n"
+            "Chromeを `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>` で"
+            "起動しているか、URLとポートが合っているか確認してください。"
+            f"(詳細: {exc})"
+        ) from exc
+    if not browser.contexts:
+        raise CdpConnectionError(
+            f"接続先Chromeに利用できるブラウザコンテキストがありません: {cdp_url}"
+        )
+    return browser, browser.contexts[0]
 
 
 def get_storage_state_path(config: dict) -> Path:
