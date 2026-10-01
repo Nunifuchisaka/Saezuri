@@ -12,6 +12,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [login.py（初回ログイン）](#loginpy初回ログイン)
   - [search.py（キーワード／ハッシュタグ検索）](#searchpyキーワードハッシュタグ検索)
   - [user_tweets.py（特定アカウント投稿追跡）](#user_tweetspy特定アカウント投稿追跡)
+  - [x_profiles.py（アカウントのフォロワー数等取得）](#x_profilespyアカウントのフォロワー数等取得)
   - [tweet.py（単一ツイート取得）](#tweetpy単一ツイート取得)
   - [trends.py（トレンド把握）](#trendspyトレンド把握)
   - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
@@ -149,6 +150,17 @@ python scripts/user_tweets.py --include-replies
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
 
 結果は`data/raw/user_tweets_<日付>.jsonl`に追記する。ハンドルごとに`state/<handle>_last_id.json`へ前回取得済み最新IDを保存し、それより新しいIDの投稿のみを差分保存する。レートリミット・チャレンジ検知時はその時点までの収集分を保存し、残りのアカウントは処理しない。
+
+### x_profiles.py（アカウントのフォロワー数等取得）
+
+`config.yaml`の`watch_accounts`（または`--handle`）の各アカウントについて`x.com/<handle>`を1回だけ開き、`UserByScreenName`を傍受してフォロワー数・フォロー数・投稿数・表示名・プロフィール文等を取得する。スクロールや再アクセスはしない。
+
+```
+python scripts/x_profiles.py                     # watch_accounts全件
+python scripts/x_profiles.py --handle some_user   # 特定の1アカウントのみ
+```
+
+結果は標準出力に表示し、`data/raw/x_profiles_<日付>.jsonl`に追記する（差分管理なし。実行ごとの時点スナップショット）。このJSONLはポストではないため`digest.py`には渡さない。レートリミット・チャレンジ検知時はそこまでの取得分を保存して中断する（終了コードは他スクリプトと共通。取得できないアカウントがあった場合は1）。
 
 ### tweet.py（単一ツイート取得）
 
@@ -343,6 +355,13 @@ media(type/url配列), is_repost, quoted_id, source_query, collected_at
 
 ```
 trend_word, tweet_volume, rank, collected_at
+```
+
+アカウントのプロフィール（`x_profiles.py`）も別スキーマ。
+
+```
+handle, user_id, name, description, followers_count, following_count, tweet_count, media_count,
+location, url, created_at, is_blue_verified, verified_type, protected, category, profile_url, collected_at
 ```
 
 **既読・差分管理（`state/`）**

@@ -25,6 +25,7 @@ playwright install chromium   # config.yamlのbrowserでfirefox/webkitを使う�
 python scripts/login.py                                          # 初回・失効時の手動ログイン
 python scripts/search.py --query "VRChat アップデート" --max 100  # キーワード検索
 python scripts/user_tweets.py                                     # watch_accounts全件の投稿追跡
+python scripts/x_profiles.py                                      # watch_accountsのフォロワー数等プロフィール取得
 python scripts/trends.py                                          # トレンド取得
 python scripts/bookmarks.py                                       # サブ垢自身のブックマーク取得
 python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Markdownダイジェスト生成
@@ -60,6 +61,10 @@ python scripts/th_user_posts.py                                   # threads.watc
 URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハンドル不明時は`i/status/<id>`）で開き`TweetDetail`を傍受する。他の収集エントリポイントと異なり`scroll_and_collect`は使わず、指定IDのPostが見つかった時点で即座に打ち切る専用の`fetch_tweet`関数で完結させている（会話スレッド全体を集める`related.py`の①会話スレッド収集とは目的が異なるため独立させた）。`related.py`から`resolve_start`/`build_status_url`/`find_post`をimportして再利用する。結果は標準出力に表示しつつ`data/raw/tweet_<日付>_<連番3桁>.jsonl`に1件保存する。差分管理（state）は行わない。見つからなかった場合は終了コード1。
 
 対象ツイートが引用ツイートの場合、TweetDetailペイロードに同梱される`quoted_status_result.result`から引用元投稿も追加リクエストなしで正規化し(`capture.py`の`find_tweet_result`/`parse_quoted_post`)、同じJSONLへ2件目のレコード(`source_query`は`quoted-by:<起点投稿id>`)として保存する。この挙動は`tweet.py`のみが対象で、`parse_timeline_payload`を使う他の収集モジュール(`search.py`等)には影響しない。
+
+### `scripts/x_profiles.py`（アカウントのプロフィール・フォロワー数取得）
+
+`x.com/<handle>`を1ハンドルにつき1回だけ開き（スクロールなし・リトライなし）、`UserByScreenName`を傍受して`XProfile`（フォロワー数・フォロー数・投稿数・表示名・プロフィール文等）へ正規化する。`watch_accounts`全件、または`--handle`指定。`parse_profile_payload`は「`rest_id`とscreen_nameを持つdict」を再帰探索で探し、2026-10時点の実機構造（`relationship_counts.followers/following`、`tweet_counts.tweets`、`core.name`、`profile_bio.description`）を主に、旧形式の`legacy.followers_count`等へフォールバックする。`legacy`配下にはフォロワー数が無いので注意。`UserByScreenName`だけを捕捉対象にする（サイドバー系のレスポンスには他人のフォロワー数が入るため捕捉しない）。`data/raw/x_profiles_<日付>.jsonl`に追記（差分管理なし）。429/チャレンジ検知時は取得済み分を保存して即中断し、終了コード契約は他と共通（取得できないアカウントがあれば1）。出力はPost/TrendEntryではないため`digest.py`には渡さない。
 
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 
