@@ -26,6 +26,7 @@ python scripts/login.py                                          # 初回・失�
 python scripts/search.py --query "VRChat アップデート" --max 100  # キーワード検索
 python scripts/user_tweets.py                                     # watch_accounts全件の投稿追跡
 python scripts/x_profiles.py                                      # watch_accountsのフォロワー数等プロフィール取得
+python scripts/th_profiles.py                                     # threads.watch_accounts全件のフォロワー数等プロフィール取得
 python scripts/trends.py                                          # トレンド取得
 python scripts/bookmarks.py                                       # サブ垢自身のブックマーク取得
 python scripts/digest.py data/raw/*.jsonl --title "..."           # JSONL→Markdownダイジェスト生成
@@ -65,6 +66,11 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 ### `scripts/x_profiles.py`（アカウントのプロフィール・フォロワー数取得）
 
 `x.com/<handle>`を1ハンドルにつき1回だけ開き（スクロールなし・リトライなし）、`UserByScreenName`を傍受して`XProfile`（フォロワー数・フォロー数・投稿数・表示名・プロフィール文等）へ正規化する。`watch_accounts`全件、または`--handle`指定。`parse_profile_payload`は「`rest_id`とscreen_nameを持つdict」を再帰探索で探し、2026-10時点の実機構造（`relationship_counts.followers/following`、`tweet_counts.tweets`、`core.name`、`profile_bio.description`）を主に、旧形式の`legacy.followers_count`等へフォールバックする。`legacy`配下にはフォロワー数が無いので注意。`UserByScreenName`だけを捕捉対象にする（サイドバー系のレスポンスには他人のフォロワー数が入るため捕捉しない）。`data/raw/x_profiles_<日付>.jsonl`に追記（差分管理なし）。429/チャレンジ検知時は取得済み分を保存して即中断し、終了コード契約は他と共通（取得できないアカウントがあれば1）。出力はPost/TrendEntryではないため`digest.py`には渡さない。
+
+
+### `scripts/th_profiles.py`（Threadsアカウントのプロフィール・フォロワー数取得）
+
+`threads.com/@<username>`を1ユーザーにつき1回だけ開き（スクロールなし・リトライなし）、ページ埋め込みJSONの`user`ノード（`username`と`follower_count`を持つdictを再帰探索）から`ThProfile`（フォロワー数・表示名・プロフィール文・認証済み・非公開・リンク）へ正規化する。`threads.watch_accounts`全件、または`--user`指定。フォロワー数は埋め込みJSONの`follower_count`が正確値（`followers_is_approx=False`、`followers_source=embedded_json`）。画面表示の「フォロワー4.3万人」は丸め表示なので、JSONに無い場合だけ`parse_follower_text`で表示テキストから概数に変換し`followers_is_approx=True`/`followers_source=page_text`で区別する。注意：`threads.py`の`load_embedded_payloads`は`text_post_app_info`を含むJSONしか返さず、投稿0件のアカウントではプロフィールJSONが落ちるため、本モジュールは`follower_count`を目印にした専用の読み出しを持つ。`data/raw/th_profiles_<日付>.jsonl`に追記（差分管理なし）。429/チャレンジ/失効検知時は取得済み分を保存して即中断し、終了コード契約は他と共通（取得できないアカウントがあれば1）。出力はPost/TrendEntryではないため`digest.py`には渡さない。
 
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 

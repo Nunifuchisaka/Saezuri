@@ -13,6 +13,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [search.py（キーワード／ハッシュタグ検索）](#searchpyキーワードハッシュタグ検索)
   - [user_tweets.py（特定アカウント投稿追跡）](#user_tweetspy特定アカウント投稿追跡)
   - [x_profiles.py（アカウントのフォロワー数等取得）](#x_profilespyアカウントのフォロワー数等取得)
+  - [th_profiles.py（Threadsアカウントのフォロワー数等取得）](#th_profilespythreadsアカウントのフォロワー数等取得)
   - [tweet.py（単一ツイート取得）](#tweetpy単一ツイート取得)
   - [trends.py（トレンド把握）](#trendspyトレンド把握)
   - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
@@ -161,6 +162,17 @@ python scripts/x_profiles.py --handle some_user   # 特定の1アカウントの
 ```
 
 結果は標準出力に表示し、`data/raw/x_profiles_<日付>.jsonl`に追記する（差分管理なし。実行ごとの時点スナップショット）。このJSONLはポストではないため`digest.py`には渡さない。レートリミット・チャレンジ検知時はそこまでの取得分を保存して中断する（終了コードは他スクリプトと共通。取得できないアカウントがあった場合は1）。
+
+### th_profiles.py（Threadsアカウントのフォロワー数等取得）
+
+`config.yaml`の`threads.watch_accounts`（または`--user`）の各アカウントについて`threads.com/@<username>`を1回だけ開き、ページ埋め込みJSONからフォロワー数（正確値）・表示名・プロフィール文・認証済みか等を取得する。JSONに無い場合のみ画面表示の「フォロワー4.3万人」等から概数を取り、`followers_is_approx`で区別する。スクロールや再アクセスはしない。事前に`th_login.py`でログインしておく。
+
+```
+python scripts/th_profiles.py                    # threads.watch_accounts全件
+python scripts/th_profiles.py --user some_brand  # 特定の1アカウントのみ
+```
+
+結果は標準出力に表示し、`data/raw/th_profiles_<日付>.jsonl`に追記する（差分管理なし。実行ごとの時点スナップショット）。このJSONLはポストではないため`digest.py`には渡さない。レートリミット・チャレンジ検知時はそこまでの取得分を保存して中断する（終了コードは他スクリプトと共通。取得できないアカウントがあった場合は1）。
 
 ### tweet.py（単一ツイート取得）
 
