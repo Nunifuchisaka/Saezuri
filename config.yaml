@@ -53,6 +53,9 @@ tiktok:
   # 例: watch_accounts: ["some_brand", "another_brand"]
   watch_accounts: []
   storage_state_path: session/tiktok_storage_state.json  # tt_login.pyの手動ログイン結果の保存先
+  # 管理人が起動・ログイン済みのChromeにCDPで接続する場合の接続先(--cdp省略時の既定)。空ならstorage_state方式
+  # 例: cdp_url: http://127.0.0.1:9222
+  cdp_url:
 
 # Brave使用時のみ必要。Brave実行ファイルの絶対パス。
 # 空/未指定なら一般的なインストール場所(下記例など)を自動探索する。

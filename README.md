@@ -355,6 +355,27 @@ TikTokの特定アカウントの投稿を、Instagram・Threads収集と同じ�
 - 差分管理は`state/tiktok_<ユーザー名>_last_id.json`（動画IDの大小比較。ピン留めされた古い投稿は新規扱いにならない）。
 - `tt_profiles.py`は`data/raw/tt_profiles_<日付>.jsonl`に追記する（差分管理なし）。項目は`handle, user_id, name, description, followers_count, following_count, likes_count, videos_count, followers_source, collected_at, is_verified, is_private, url, profile_url`。ポストではないため`digest.py`には渡さない。
 - CAPTCHAは「CAPTCHA配信への通信」「`/captcha`URLへの遷移」「画面上のCAPTCHA要素」のいずれかで検知する。ログイン判定はTikTokが未ログインでも閲覧できるため`sessionid` Cookieの有無・期限のみで行う（ログイン画面へ飛ばされたら収集途中でも失効として終了コード2）。
+
+#### 自分のChromeにCDPで接続して収集する（`--cdp`）
+
+`tt_login.py`のログイン試行が上限に達してstorage_stateを作れない場合などに、管理人が自分で起動・ログイン済みのChromeへCDP（Chrome DevTools Protocol）で接続して`tt_user_posts.py`／`tt_profiles.py`を実行できる。
+
+1. 専用プロファイルでChromeを起動する（デバッグポート付き）
+   ```
+   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\chrome-saezuri-profile
+   ```
+   最近のChromeは**既定プロファイルではデバッグポートが使えない**ため、`--user-data-dir`で専用プロファイルのフォルダを必ず指定する（初回は空のプロファイルで起動する）。
+2. そのChromeでTikTokを開き、手動でログインする（ログイン情報は専用プロファイルに残るので次回以降は不要）。
+3. 収集する
+   ```
+   python scripts/tt_profiles.py --cdp http://127.0.0.1:9222
+   python scripts/tt_user_posts.py --cdp http://127.0.0.1:9222
+   ```
+
+- `--cdp`省略時は`config.yaml`の`tiktok.cdp_url`、それも空なら従来のstorage_state方式（`tt_login.py`）で動く。
+- 接続先Chromeの既存コンテキストに新しいタブを開いて使い、終了時にそのタブだけ閉じる。Chrome本体は閉じず、storage_stateも保存しない。
+- ログイン検証は、そのChromeのCookieに有効期限内の`sessionid`（tiktok.com）があるかで行う。無ければ終了コード2。接続できない（Chrome未起動・ポート違い）場合は終了コード1。
+- 自動ログイン・CAPTCHA突破・自動リトライは行わない。CAPTCHA検知時は即中断して終了コード4。
 - `digest.py`・`media.py`にそのまま渡せる（`media.py`で保存されるのはカバー画像のみ）。終了コードの契約は`ig_user_posts.py`と同じ。
 - キーワード検索・リポスト／いいね一覧は未対応。
 
@@ -378,6 +399,7 @@ TikTokの特定アカウントの投稿を、Instagram・Threads収集と同じ�
 | `threads.storage_state_path` | `th_login.py`の手動ログイン結果の保存先（既定: `session/threads_storage_state.json`） |
 | `tiktok.watch_accounts` | `tt_user_posts.py`／`tt_profiles.py`が追跡対象にするTikTokユーザー名のリスト（`@`は付けない） |
 | `tiktok.storage_state_path` | `tt_login.py`の手動ログイン結果の保存先（既定: `session/tiktok_storage_state.json`） |
+| `tiktok.cdp_url` | 管理人のChromeにCDPで接続する際の接続先（例: `http://127.0.0.1:9222`）。`--cdp`省略時の既定で、空ならstorage_state方式 |
 | `browser_executable_path` | `brave`使用時のみ必要。Brave実行ファイルの絶対パス。空／未指定なら一般的なインストール場所を自動探索する |
 
 いずれもプロジェクトルートからの相対パスで指定する（`browser_executable_path`は絶対パス）。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要（[セットアップ](#セットアップ)参照）。`brave`使用時、自動検出（`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`等の一般的なインストール場所を順に確認）に失敗する場合は`browser_executable_path`に絶対パスを指定すること。

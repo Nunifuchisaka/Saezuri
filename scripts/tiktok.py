@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
@@ -32,7 +33,13 @@ from playwright.sync_api import BrowserContext, Page, Response
 from capture import now_iso
 from instagram import InstagramCapture, _dig, _timestamp_to_iso, _to_int
 from schema import MediaItem, Post
-from session import SessionExpiredError
+from session import (
+    SessionExpiredError,
+    connect_cdp,
+    get_browser_executable_path,
+    launch_browser,
+    resolve_cdp_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +116,45 @@ def new_tiktok_context(browser, config: dict, **kwargs) -> BrowserContext:
             "先にtt_login.pyを実行して手動ログインしてください。"
         )
     return browser.new_context(storage_state=str(storage_state_path), **kwargs)
+
+
+def get_tiktok_cdp_url(cli_value: Optional[str], config: dict) -> Optional[str]:
+    """--cdp指定 > config.yamlのtiktok.cdp_url > None(従来のstorage_state方式)。"""
+    return resolve_cdp_url(cli_value, get_tiktok_config(config))
+
+
+CDP_RELOGIN_MESSAGE = (
+    "接続先ChromeがTikTokにログインしていません(有効なsessionid Cookieがありません)。"
+    "そのChromeでTikTokに手動ログインしてから再実行してください。"
+)
+
+
+@contextmanager
+def open_tiktok_context(
+    playwright, config: dict, cdp_url: Optional[str], browser_name: str, headed: bool
+):
+    """TikTok収集用のBrowserContextを開いて渡し、ログイン検証まで済ませる。
+
+    cdp_urlあり: 起動済みChromeに接続し既存context(contexts[0])を使う。
+      Chrome本体は閉じず、storage_stateも使わない(タブを閉じるのは呼び出し側)。
+    cdp_urlなし: 従来どおりstorage_stateでブラウザを起動し、終了時に閉じる。
+    """
+    if cdp_url:
+        _, context = connect_cdp(playwright, cdp_url)
+        if not has_tiktok_session_cookie(context.cookies()):
+            raise SessionExpiredError(CDP_RELOGIN_MESSAGE)
+        yield context
+        return
+    browser = launch_browser(
+        playwright, browser_name, headless=not headed,
+        executable_path=get_browser_executable_path(config),
+    )
+    try:
+        context = new_tiktok_context(browser, config)
+        require_tiktok_login(context)
+        yield context
+    finally:
+        browser.close()
 
 
 def has_tiktok_session_cookie(cookies: Iterable[dict], now: Optional[float] = None) -> bool:

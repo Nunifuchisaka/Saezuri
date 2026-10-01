@@ -118,6 +118,8 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 - **`tt_login.py`** / **`tt_user_posts.py`**：`th_login.py`/`th_user_posts.py`と同構成（埋め込みJSON注入は無し）。`filter_by_author`は`ig_user_posts.py`から流用。`data/raw/tiktok_posts_<日付>.jsonl`に追記し、`state/tiktok_<ユーザー名>_last_id.json`で差分管理。
 - **`tt_profiles.py`**：`th_profiles.py`相当。埋め込みJSON（`userInfo`）または`user_detail`APIからフォロワー数・フォロー数・いいね合計（`heartCount`）・動画数を取り`data/raw/tt_profiles_<日付>.jsonl`に追記（差分管理なし）。概数フォールバック（画面テキスト解析）は実装していない。
 
+**CDP接続（`--cdp`）**：`tt_user_posts.py`/`tt_profiles.py`は`--cdp http://127.0.0.1:9222`（省略時は`config.yaml`の`tiktok.cdp_url`、空ならstorage_state方式）で、管理人が自分で起動・ログイン済みのChromeに`connect_over_cdp`で接続できる(tt_login.pyの試行上限対策)。共通ヘルパーは`session.py`の`resolve_cdp_url`/`connect_cdp`/`CdpConnectionError`、TikTok側の入口は`tiktok.py`の`open_tiktok_context`(ログイン検証込みのcontextマネージャ)。既存の`contexts[0]`に新規タブを開いて使い、閉じるのはタブだけ(Chrome本体は閉じない・storage_stateは保存しない)。ログイン検証は`sessionid` Cookieの有効期限判定(無ければ終了コード2)、接続失敗は終了コード1。起動例: `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>`で起動→TikTokにログイン→`python scripts/tt_profiles.py --cdp http://127.0.0.1:9222`。**最近のChromeは既定プロファイルではデバッグポートが使えないため、`--user-data-dir`での専用プロファイル指定が必須。** CAPTCHA検知で即中断(終了コード4)・自動ログイン/突破/リトライなしの方針は不変。単体テストは`tests/test_cdp.py`。実機未確認。
+
 ### `digest.py`（収集系と非依存）
 
 `data/raw/*.jsonl`を読み込みMarkdownダイジェストを生成する唯一の非Playwright依存モジュール。Xへの実アクセスは一切行わない。各行を`trend_word`キーの有無／`id`+`author_handle`キーの有無で`Post`/`TrendEntry`に判別する（`classify_record`）。エンゲージメント合計（like+repost+reply+quote）順の「注目ポスト」セクションは著作権配慮のため本文要約（先頭100文字）+出典URLのみで全文転載はしない設計を維持すること。

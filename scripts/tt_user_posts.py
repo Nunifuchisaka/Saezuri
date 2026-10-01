@@ -41,18 +41,17 @@ from capture import (
 from ig_user_posts import filter_by_author
 from session import (
     SUPPORTED_BROWSERS,
+    CdpConnectionError,
     SessionExpiredError,
-    get_browser_executable_path,
     get_browser_name,
-    launch_browser,
     load_config,
 )
 from tiktok import (
     TikTokCapture,
+    get_tiktok_cdp_url,
     get_tiktok_watch_accounts,
-    new_tiktok_context,
+    open_tiktok_context,
     parse_tiktok_payload,
-    require_tiktok_login,
 )
 from user_tweets import dedupe_by_id, filter_new_posts, max_post_id
 
@@ -79,6 +78,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config.yaml", help="設定ファイルのパス(既定: config.yaml)")
     parser.add_argument("--browser", choices=SUPPORTED_BROWSERS, default=None,
                         help="起動するブラウザエンジン(省略時はconfig.yamlのbrowser)")
+    parser.add_argument("--cdp", default=None, metavar="URL",
+                        help="管理人が起動・ログイン済みのChromeにCDPで接続する(例: http://127.0.0.1:9222。"
+                             "省略時はconfig.yamlのtiktok.cdp_url、それも無ければstorage_state方式)")
     parser.add_argument("--headed", action="store_true", help="ブラウザを可視状態で起動する(デバッグ用)")
     return parser
 
@@ -143,6 +145,7 @@ def run(args: argparse.Namespace) -> int:
     max_items = args.max if args.max is not None else get_max_items(config)
     wait_range = get_wait_seconds_range(config)
     browser_name = args.browser or get_browser_name(config)
+    cdp_url = get_tiktok_cdp_url(args.cdp, config)
 
     users = resolve_users(args, config)
     if not users:
@@ -156,13 +159,9 @@ def run(args: argparse.Namespace) -> int:
 
     try:
         with sync_playwright() as playwright:
-            browser = launch_browser(
-                playwright, browser_name, headless=not args.headed,
-                executable_path=get_browser_executable_path(config),
-            )
-            try:
-                context = new_tiktok_context(browser, config)
-                require_tiktok_login(context)
+            with open_tiktok_context(
+                playwright, config, cdp_url, browser_name, args.headed
+            ) as context:
                 for username in users:
                     state_key = f"{STATE_KEY_PREFIX}{username}"
                     last_id = storage.load_last_id(state_dir, state_key)
@@ -181,9 +180,7 @@ def run(args: argparse.Namespace) -> int:
                           f" (前回最新ID: {last_id or 'なし'})")
                     if blocked is not None:
                         break
-            finally:
-                browser.close()
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, CdpConnectionError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except SessionExpiredError as exc:
