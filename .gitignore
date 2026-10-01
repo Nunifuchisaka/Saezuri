@@ -4,6 +4,7 @@ __pycache__/
 x_storage_state.json
 instagram_storage_state.json
 threads_storage_state.json
+tiktok_storage_state.json
 seen_ids.json
 *_last_id.json
 *.jsonl

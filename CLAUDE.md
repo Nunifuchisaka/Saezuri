@@ -35,9 +35,12 @@ python scripts/ig_login.py                                        # Instagramの
 python scripts/ig_user_posts.py                                   # instagram.watch_accounts全件の投稿追跡
 python scripts/th_login.py                                        # Threadsの初回・失効時の手動ログイン
 python scripts/th_user_posts.py                                   # threads.watch_accounts全件の投稿追跡
+python scripts/tt_login.py                                        # TikTokの初回・失効時の手動ログイン
+python scripts/tt_user_posts.py                                   # tiktok.watch_accounts全件の投稿追跡(CAPTCHA検知で即中断)
+python scripts/tt_profiles.py                                     # tiktok.watch_accounts全件のフォロワー数等プロフィール取得
 ```
 
-`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`・`tests/test_threads_parse.py`は`instagram.py`・`threads.py`の投稿正規化ロジックを検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
+`tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`・`tests/test_threads_parse.py`は`instagram.py`・`threads.py`の投稿正規化ロジックを検証する。`tests/test_tiktok_parse.py`・`test_tt_profiles_parse.py`・`test_tt_user_posts.py`は`tiktok.py`・`tt_profiles.py`・`tt_user_posts.py`の正規化・CAPTCHA検知ロジックを合成データで検証する）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
 
 ## 運用上の制約（コード変更時に踏まえること）
 
@@ -106,6 +109,15 @@ ThreadsはInstagramと同じ基盤で投稿ノードもv1形式とほぼ同じ�
 - **`parse_threads_payload`**：`text_post_app_info`を持つv1形式の投稿ノードを再帰探索で拾う（内側の引用元投稿・カルーセル子要素には潜らない）。メディア抽出・時刻変換は`instagram.py`の`_parse_v1_media_list`/`_timestamp_to_iso`等を流用。`reply_count`＝`direct_reply_count`、`repost_count`/`quote_count`＝`text_post_app_info`の値、`quoted_id`＝`share_info.quoted_post`のpk、投稿者が対象アカウントと異なる投稿は`is_repost=True`。
 - **`th_login.py`** / **`th_user_posts.py`**：`ig_login.py`/`ig_user_posts.py`と同構成。`data/raw/threads_posts_<日付>.jsonl`に追記し、`state/threads_<ユーザー名>_last_id.json`で差分管理。
 
+### TikTok収集（`scripts/tiktok.py` / `tt_login.py` / `tt_user_posts.py` / `tt_profiles.py`）
+
+Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未確認**（APIのURL・JSONキーは公開情報・既知の構造に基づく想定。管理人のログイン後に実機で突き合わせること）。
+
+- **`tiktok.py`**（共通基盤）：TikTok用storage_state（`tiktok.storage_state_path`）のロードと`sessionid` Cookie（有効期限つき）によるログイン検証（`require_tiktok_login`）。TikTokは未ログインでも閲覧できCAPTCHAリスクがあるため、検証用のページ遷移はせずCookieのみで判定する。`TikTokCapture`は`InstagramCapture`を継承し、捕捉対象は`/api/post/item_list/`（投稿一覧）と`/api/user/detail/`（プロフィール）。**CAPTCHAは「`/captcha/`配信への通信」「`/captcha`URL遷移」「`CAPTCHA_SELECTORS`のDOM要素」のいずれかで検知して`ChallengeDetectedError`**（突破・回避コードは書かない）。ログイン画面遷移は`SessionExpiredError`、429は`RateLimitedError`。
+- **`parse_tiktok_payload`**：`id`+`createTime`+`video`/`imagePost`/`stats`を持つdictを再帰探索で拾う（内側には潜らない）。`like_count`＝`diggCount`、`reply_count`＝`commentCount`、`repost_count`＝`shareCount`、`quote_count`＝0、`text`＝`desc`、`lang`＝`textLanguage`。`stats`が無ければ`statsV2`（文字列）を読む。メディアはフォトモード（`imagePost.images`）なら各画像を`photo`、それ以外は`originCover`>`cover`>`dynamicCover`の最初の1件を`photo`＋`playAddr`/`downloadAddr`を`video`。再生数・保存数はPostスキーマに無いため保持しない（`schema.py`は拡張しない方針）。`author.uniqueId`が無い投稿は警告してスキップ。
+- **`tt_login.py`** / **`tt_user_posts.py`**：`th_login.py`/`th_user_posts.py`と同構成（埋め込みJSON注入は無し）。`filter_by_author`は`ig_user_posts.py`から流用。`data/raw/tiktok_posts_<日付>.jsonl`に追記し、`state/tiktok_<ユーザー名>_last_id.json`で差分管理。
+- **`tt_profiles.py`**：`th_profiles.py`相当。埋め込みJSON（`userInfo`）または`user_detail`APIからフォロワー数・フォロー数・いいね合計（`heartCount`）・動画数を取り`data/raw/tt_profiles_<日付>.jsonl`に追記（差分管理なし）。概数フォールバック（画面テキスト解析）は実装していない。
+
 ### `digest.py`（収集系と非依存）
 
 `data/raw/*.jsonl`を読み込みMarkdownダイジェストを生成する唯一の非Playwright依存モジュール。Xへの実アクセスは一切行わない。各行を`trend_word`キーの有無／`id`+`author_handle`キーの有無で`Post`/`TrendEntry`に判別する（`classify_record`）。エンゲージメント合計（like+repost+reply+quote）順の「注目ポスト」セクションは著作権配慮のため本文要約（先頭100文字）+出典URLのみで全文転載はしない設計を維持すること。
@@ -123,7 +135,7 @@ ThreadsはInstagramと同じ基盤で投稿ノードもv1形式とほぼ同じ�
 
 ## 設定ファイル（`config.yaml`）
 
-`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`instagram.watch_accounts`/`instagram.storage_state_path`（Instagram収集用）、`threads.watch_accounts`/`threads.storage_state_path`（Threads収集用）、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
+`watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`instagram.watch_accounts`/`instagram.storage_state_path`（Instagram収集用）、`threads.watch_accounts`/`threads.storage_state_path`（Threads収集用）、`tiktok.watch_accounts`/`tiktok.storage_state_path`（TikTok収集用）、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
 
 ## 配置・Git管理について
 
