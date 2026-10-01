@@ -84,6 +84,12 @@ def resolve_users(args: argparse.Namespace, config: dict) -> list[str]:
     return get_instagram_watch_accounts(config)
 
 
+def filter_by_author(posts: list, username: str) -> list:
+    """作者が対象ユーザー本人の投稿だけを残す(サイドバーのおすすめ・広告等の他人の投稿を除外。大文字小文字は無視)。"""
+    target = username.lower()
+    return [post for post in posts if post.author_handle.lower() == target]
+
+
 def collect_user(
     context,
     username: str,
@@ -96,9 +102,12 @@ def collect_user(
     buffer: list = []
 
     def parse(payload: dict, endpoint: str) -> list:
-        posts = parse_instagram_payload(
-            payload, endpoint, default_handle=username,
-            source_query=source_query, collected_at=collected_at,
+        posts = filter_by_author(
+            parse_instagram_payload(
+                payload, endpoint, default_handle=username,
+                source_query=source_query, collected_at=collected_at,
+            ),
+            username,
         )
         buffer.extend(posts)
         return posts

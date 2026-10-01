@@ -84,7 +84,7 @@ X側と同じ方針（手動ログインのstorage_state再利用・内部APIレ
 - **`instagram.py`**（共通基盤）：Instagram用storage_state（`config.yaml`の`instagram.storage_state_path`、X用とは別ファイル）のロードと、`sessionid` Cookie＋ログイン画面リダイレクト有無によるログイン検証（`require_instagram_login`、失効時`SessionExpiredError`）。`InstagramCapture`は`GraphQLCapture`を継承し、URLで`web_profile_info`/`feed/user`/`graphql/query`/`api/graphql`を捕捉する。429でレートリミット、本文の`checkpoint_required`等やURLの`/challenge`等でチャレンジ、ログイン画面遷移で失効を検知する。`capture.scroll_and_collect`にそのまま渡せる。
 - **`parse_instagram_payload`**：ルートキーを決め打ちせず、v1形式（`code`+`taken_at`+`pk`/`id`）と旧GraphQL形式（`shortcode`+`taken_at_timestamp`）の投稿ノードを再帰探索で拾って`Post`へ正規化する。投稿ノードの内側（カルーセル子要素）には潜らない。ストーリーズ（`product_type == "story"`）は除外。欠けたキーは`logger.warning()`でその1件だけスキップする。`Post`への対応は`url`＝`/p/<code>/`、`reply_count`＝コメント数、`repost_count`/`quote_count`＝0、`source_query`＝`instagram:<ユーザー名>`。
 - **`ig_login.py`**：`login.py`のInstagram版。`sessionid` Cookie付与をポーリングで待ってstorage_stateを保存する。自動入力は追加しない。
-- **`ig_user_posts.py`**：`user_tweets.py`と同じ構成・終了コード契約。`data/raw/instagram_posts_<日付>.jsonl`に追記し、`state/instagram_<ユーザー名>_last_id.json`で差分管理（`user_tweets.py`の`filter_new_posts`/`max_post_id`/`dedupe_by_id`を再利用）。収集途中の失効（ログイン画面遷移）もそこまでの分を保存してから終了コード2で終える。
+- **`ig_user_posts.py`**：`user_tweets.py`と同じ構成・終了コード契約。`data/raw/instagram_posts_<日付>.jsonl`に追記し、`state/instagram_<ユーザー名>_last_id.json`で差分管理（`user_tweets.py`の`filter_new_posts`/`max_post_id`/`dedupe_by_id`を再利用）。収集途中の失効（ログイン画面遷移）もそこまでの分を保存してから終了コード2で終える。作者が対象アカウント本人の投稿のみ保存する（プロフィールページのサイドバー等に出る他人の投稿は`filter_by_author`で`scroll_and_collect`に渡す前に除外し、件数・差分管理の最大IDにも含めない）。
 
 ### Threads収集（`scripts/threads.py` / `th_login.py` / `th_user_posts.py`）
 
