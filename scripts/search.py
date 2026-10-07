@@ -8,6 +8,7 @@ data/raw/search_<日付>_<連番3桁>.jsonl という新規ファイルに保存
 使用例:
     python scripts/search.py --query "VRChat アップデート" --mode live --max 100
     python scripts/search.py --query "#VRChat" --since-days 7
+    python scripts/search.py --from someone --since 2026-01-01 --split-days 30 --max 100
 
 終了コード: 0=正常 / 1=設定・環境エラー / 2=セッション失効 /
 3=レートリミット(429)検知 / 4=チャレンジ画面検知
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import random
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -56,9 +58,25 @@ EXIT_RATE_LIMITED = 3
 EXIT_CHALLENGE = 4
 
 
+def parse_date_arg(value: str) -> date:
+    """YYYY-MM-DD形式の日付文字列をdateに変換する(argparseのtype用)。"""
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"日付はYYYY-MM-DD形式で指定してください: {value}")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="キーワード/ハッシュタグ検索の収集(SearchTimeline傍受)")
-    parser.add_argument("--query", required=True, help="検索クエリ(ハッシュタグ・検索演算子も可)")
+    parser.add_argument("--query", default="", help="検索クエリ(ハッシュタグ・検索演算子も可。--from指定時は省略可)")
+    parser.add_argument("--from", dest="from_handle", default=None, metavar="HANDLE",
+                        help="指定アカウントの投稿に絞る(クエリにfrom:HANDLEを付加。先頭の@は除去)")
+    parser.add_argument("--since", type=parse_date_arg, default=None, metavar="YYYY-MM-DD",
+                        help="この日以降に絞る(since:を付加。--since-daysより優先)")
+    parser.add_argument("--until", type=parse_date_arg, default=None, metavar="YYYY-MM-DD",
+                        help="この日より前に絞る(until:を付加。Xの仕様で当日は含まない)")
+    parser.add_argument("--split-days", type=int, default=None, metavar="N",
+                        help="--since〜--untilをN日幅の窓に分割し、窓ごとに順次検索する(--maxは窓ごとの上限。--until省略時は明日まで)")
     parser.add_argument("--mode", choices=("live", "top"), default="live",
                         help="検索タブ(live=最新, top=話題)。既定: live")
     parser.add_argument("--since-days", type=int, default=None, metavar="N",
@@ -78,6 +96,54 @@ def build_search_query(query: str, since_days: int | None) -> str:
         since = date.today() - timedelta(days=since_days)
         query = f"{query} since:{since.isoformat()}"
     return query
+
+
+def normalize_handle(handle: str) -> str:
+    """ハンドルから先頭の@を除去する。"""
+    return handle.strip().lstrip("@")
+
+
+def resolve_date_range(
+    since: date | None,
+    until: date | None,
+    since_days: int | None,
+    today: date | None = None,
+) -> tuple[date | None, date | None]:
+    """--since/--until/--since-daysから実際に使う(since, until)を決める。--sinceを--since-daysより優先する。"""
+    today = today or date.today()
+    if since is None and since_days is not None:
+        since = today - timedelta(days=since_days)
+    return since, until
+
+
+def build_query(
+    query: str,
+    handle: str | None = None,
+    since: date | None = None,
+    until: date | None = None,
+) -> str:
+    """クエリへfrom:/since:/until:演算子を付加する。"""
+    parts = [query.strip()] if query.strip() else []
+    if handle:
+        parts.append(f"from:{normalize_handle(handle)}")
+    if since is not None:
+        parts.append(f"since:{since.isoformat()}")
+    if until is not None:
+        parts.append(f"until:{until.isoformat()}")
+    return " ".join(parts)
+
+
+def split_windows(since: date, until: date, days: int) -> list[tuple[date, date]]:
+    """[since, until)をdays日幅に分割した(開始, 終了)のリストを返す。終了はuntil:に使う排他的な日付。"""
+    if days < 1:
+        raise ValueError("--split-daysは1以上で指定してください")
+    windows = []
+    start = since
+    while start < until:
+        end = min(start + timedelta(days=days), until)
+        windows.append((start, end))
+        start = end
+    return windows
 
 
 def build_search_url(query: str, mode: str) -> str:
@@ -116,16 +182,40 @@ def run(args: argparse.Namespace) -> int:
     wait_range = get_wait_seconds_range(config)
     browser_name = args.browser or get_browser_name(config)
 
-    query = build_search_query(args.query, args.since_days)
-    url = build_search_url(query, args.mode)
+    since, until = resolve_date_range(args.since, args.until, args.since_days)
+    if args.split_days is not None:
+        if since is None:
+            print("エラー: --split-daysには--since(または--since-days)が必要です", file=sys.stderr)
+            return EXIT_ERROR
+        if until is None:
+            until = date.today() + timedelta(days=1)
+        try:
+            windows = split_windows(since, until, args.split_days)
+        except ValueError as exc:
+            print(f"エラー: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        if not windows:
+            print("エラー: --sinceが--until以降になっています", file=sys.stderr)
+            return EXIT_ERROR
+        targets = [
+            build_query(args.query, args.from_handle, w_since, w_until)
+            for w_since, w_until in windows
+        ]
+    else:
+        targets = [build_query(args.query, args.from_handle, since, until)]
+    if not targets[0].strip():
+        print("エラー: --queryまたは--fromを指定してください", file=sys.stderr)
+        return EXIT_ERROR
+    query = targets[0] if len(targets) == 1 else f"{args.query} (窓分割{len(targets)}件)".strip()
     collected_at = now_iso()
 
     # scroll_and_collect内で例外中断してもparse済み分を保存できるよう、外側にも溜める
     buffer: list = []
+    current_query = targets[0]
 
     def parse(payload: dict, operation: str) -> list:
         posts = parse_timeline_payload(
-            payload, operation, source_query=query, collected_at=collected_at
+            payload, operation, source_query=current_query, collected_at=collected_at
         )
         buffer.extend(posts)
         return posts
@@ -147,14 +237,21 @@ def run(args: argparse.Namespace) -> int:
                 page = context.new_page()
                 capture = GraphQLCapture(operations=("SearchTimeline",))
                 capture.attach(page)
-                page.goto(url, wait_until="domcontentloaded")
-                posts = scroll_and_collect(
-                    page,
-                    capture,
-                    parse,
-                    max_items=max_items,
-                    wait_seconds_range=wait_range,
-                )
+                for index, current_query in enumerate(targets):
+                    if index > 0:
+                        page.wait_for_timeout(random.uniform(*wait_range) * 1000)
+                    capture.clear()
+                    page.goto(build_search_url(current_query, args.mode), wait_until="domcontentloaded")
+                    window_posts = scroll_and_collect(
+                        page,
+                        capture,
+                        parse,
+                        max_items=max_items,
+                        wait_seconds_range=wait_range,
+                    )
+                    posts.extend(window_posts)
+                    if len(targets) > 1:
+                        logger.info("窓 %d/%d: %d件取得 (%s)", index + 1, len(targets), len(window_posts), current_query)
             finally:
                 if capture is not None and page is not None:
                     try:
@@ -169,13 +266,14 @@ def run(args: argparse.Namespace) -> int:
         print(f"エラー: {exc}", file=sys.stderr)
         return EXIT_SESSION_EXPIRED
     except RateLimitedError as exc:
-        posts = dedupe_by_id(buffer)
         exit_code = EXIT_RATE_LIMITED
         error_message = str(exc)
     except ChallengeDetectedError as exc:
-        posts = dedupe_by_id(buffer)
         exit_code = EXIT_CHALLENGE
         error_message = str(exc)
+    if exit_code:
+        posts = buffer
+    posts = dedupe_by_id(posts)
 
     seen_ids = storage.load_seen_ids(state_dir)
     records = [post.to_dict() for post in posts]

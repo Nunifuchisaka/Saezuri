@@ -90,6 +90,7 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 
 保存先・差分管理の違い：
 - `search.py`：実行ごとに新規ファイル`data/raw/search_<日付>_<連番3桁>.jsonl`。既読IDは`state/seen_ids.json`でグローバル管理。
+  - 検索演算子用オプション`--from HANDLE`（`@`除去）・`--since`/`--until`（YYYY-MM-DD。`--since`は`--since-days`より優先）。`--split-days N`は`--since`〜`--until`（省略時は明日まで）をN日幅の窓に分割し、1ブラウザセッション内で窓ごとに順次検索して1つのJSONLに保存する（`--max`は窓ごとの上限、窓間はwait_seconds範囲のランダム待機、各窓の取得件数をログ出力、429/チャレンジ検知時は取得済み分を保存して即中断）。クエリ組み立て・窓分割は純粋関数（`build_query`/`split_windows`/`resolve_date_range`、`tests/test_search_query.py`）。
 - `user_tweets.py`：`data/raw/user_tweets_<日付>.jsonl`に追記。ハンドルごとに`state/<handle>_last_id.json`で差分管理。
 - `trends.py`：`data/raw/trends_<日付>.jsonl`に追記。`interest_keywords`によるフィルタが既定でON（`--no-filter`で解除）。
 - `bookmarks.py`：`data/raw/bookmarks_<日付>.jsonl`に追記。`state/bookmarks_last_id.json`で差分管理。ログイン中のサブ垢自身のブックマークしか取得できない制約あり（ID大小比較での差分判定のため、古い投稿を後からブックマークすると取得漏れが起こりうる。既知の制約としてREADME参照）。
@@ -122,6 +123,10 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 - **`tt_profiles.py`**：`th_profiles.py`相当。埋め込みJSON（`userInfo`）または`user_detail`APIからフォロワー数・フォロー数・いいね合計（`heartCount`）・動画数を取り`data/raw/tt_profiles_<日付>.jsonl`に追記（差分管理なし）。概数フォールバック（画面テキスト解析）は実装していない。
 
 **CDP接続（`--cdp`）**：`tt_user_posts.py`/`tt_profiles.py`は`--cdp http://127.0.0.1:9222`（省略時は`config.yaml`の`tiktok.cdp_url`、空ならstorage_state方式）で、管理人が自分で起動・ログイン済みのChromeに`connect_over_cdp`で接続できる(tt_login.pyの試行上限対策)。共通ヘルパーは`session.py`の`resolve_cdp_url`/`connect_cdp`/`CdpConnectionError`、TikTok側の入口は`tiktok.py`の`open_tiktok_context`(ログイン検証込みのcontextマネージャ)。既存の`contexts[0]`に新規タブを開いて使い、閉じるのはタブだけ(Chrome本体は閉じない・storage_stateは保存しない)。ログイン検証は`sessionid` Cookieの有効期限判定(無ければ終了コード2)、接続失敗は終了コード1。起動例: `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>`で起動→TikTokにログイン→`python scripts/tt_profiles.py --cdp http://127.0.0.1:9222`。**最近のChromeは既定プロファイルではデバッグポートが使えないため、`--user-data-dir`での専用プロファイル指定が必須。** CAPTCHA検知で即中断(終了コード4)・自動ログイン/突破/リトライなしの方針は不変。単体テストは`tests/test_cdp.py`。実機未確認。
+
+### `pick.py`（収集系と非依存）
+
+収集済み`data/raw/*.jsonl`（複数・ワイルドカード可）から投稿を絞り込んでMarkdown（月見出し→日付(JST)・エンゲージメント・本文先頭100字・URL）またはJSONLで出力する。Playwright非依存でXへアクセスしない。`--handle`、`--keyword`（複数はOR・大文字小文字無視、text/記事本文）、`--since`/`--until`（`created_at`の"Mon Sep 21 03:28:32 +0000 2026"形式をパースしJST基準・両端含む）、`--exclude-reposts`、`--top-per month|none`＋`--top N`（エンゲージメント上位）、`--format md|jsonl`。id重複は除去。テストは`tests/test_pick.py`。
 
 ### `digest.py`（収集系と非依存）
 

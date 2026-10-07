@@ -123,12 +123,40 @@ python scripts/search.py --query "#VRChat" --since-days 7
 | `--query`（必須） | 検索クエリ（ハッシュタグ・検索演算子も可） |
 | `--mode` | `live`（最新）／`top`（話題）。既定: `live` |
 | `--since-days N` | N日前以降に絞る（クエリに`since:YYYY-MM-DD`を付加） |
+| `--from HANDLE` | 指定アカウントの投稿に絞る（`from:HANDLE`を付加。`@`は除去。`--query`は省略可） |
+| `--since` / `--until` | `YYYY-MM-DD`で期間指定（`since:`/`until:`を付加。`--since`は`--since-days`より優先。`until`は当日を含まない） |
+| `--split-days N` | `--since`〜`--until`（省略時は明日まで）をN日幅の窓に分割し、1セッション内で窓ごとに順次検索して1つのJSONLに保存。`--max`は窓ごとの上限。429/チャレンジ検知時は取得済み分を保存して中断 |
 | `--max` | 取得上限件数（省略時は`config.yaml`の`max_items`） |
 | `--config` | 設定ファイルのパス（既定: `config.yaml`） |
 | `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
 
 結果は実行ごとに`data/raw/search_<日付>_<連番3桁>.jsonl`という新規ファイルに保存する（同日に複数回実行してもキーワードごとにファイルが分離され、連番はその日の実行回数でカウントする）。既読IDは`state/seen_ids.json`でグローバル管理する（同一IDは再保存しない）。
+
+長期間を遡る例（Xの検索は1クエリで長期間を遡りにくいため窓分割する）：
+
+```
+python scripts/search.py --from aichan_nel --query "-filter:replies" --since 2026-01-01 --split-days 30 --max 100
+```
+
+### pick.py（収集済みJSONLからの抽出）
+
+収集済みJSONLから投稿を絞り込み、月ごとに整理して出力する（X本体へは再アクセスしない）。
+
+```
+python scripts/pick.py data/raw/search_*.jsonl --handle aichan_nel --exclude-reposts --since 2026-01-01 --top-per month --top 3
+```
+
+| オプション | 説明 |
+|---|---|
+| `--handle` | `author_handle`で絞る |
+| `--keyword` | `text`／記事本文の部分一致（複数指定はOR・大文字小文字無視） |
+| `--since` / `--until` | `YYYY-MM-DD`（JST基準・両端含む） |
+| `--exclude-reposts` | リポストを除外 |
+| `--top-per month\|none` / `--top N` | 月ごと（または全体）のエンゲージメント（like+repost+reply+quote）上位N件 |
+| `--format md\|jsonl` | 出力形式（既定: `md`。月見出し→日付(JST)・エンゲージメント・本文先頭100字・URL） |
+
+重複idは除去する。
 
 ### user_tweets.py（特定アカウント投稿追跡）
 
