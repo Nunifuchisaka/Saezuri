@@ -57,3 +57,11 @@ def test_build_x_top_sections_only_collected_relations():
     sections = related.build_x_top_sections([], "1", None, {"quote"}, top=10)
     assert [label for label, _, _ in sections] == ["引用"]
     assert related.build_x_top_sections([], "1", None, {"author"}, top=10) == []
+
+
+def test_quote_scroll_script_popular_scrolls_to_bottom():
+    from capture import SCROLL_SCRIPT
+
+    assert related.quote_scroll_script("popular") == related.QUOTE_SEARCH_SCROLL_SCRIPT
+    assert "scrollHeight" in related.QUOTE_SEARCH_SCROLL_SCRIPT
+    assert related.quote_scroll_script("recent") == SCROLL_SCRIPT

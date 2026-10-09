@@ -48,6 +48,7 @@ from capture import (
     ChallengeDetectedError,
     GraphQLCapture,
     RateLimitedError,
+    SCROLL_SCRIPT,
     get_max_items,
     get_wait_seconds_range,
     now_iso,
@@ -100,6 +101,8 @@ REPLY_SORT_LIKES_TEXTS = ("いいね", "Likes")
 REPLY_SORT_WAIT_ROUNDS = 10
 REPLY_SORT_SETTLE_MS = 4000
 VIEWPORT = {"width": 1280, "height": 1000}
+# 人気順の引用検索は1回でページ末尾まで送る(既定の2画面分では20件分の末尾に届かず次ページが来ないため)
+QUOTE_SEARCH_SCROLL_SCRIPT = "window.scrollBy(0, document.body.scrollHeight)"
 
 FIND_REPLY_SORT_BUTTON_JS = """
 (texts) => {
@@ -228,6 +231,11 @@ def next_related_out_path(raw_dir: Path, today: str | None = None, prefix: str =
 def quote_search_modes(sort: str) -> list[str]:
     """引用検索で回す検索タブ。popularは話題(top)と最新(live)の両方、recentは従来どおりliveのみ。"""
     return ["top", "live"] if sort == SORT_POPULAR else ["live"]
+
+
+def quote_scroll_script(sort: str) -> str:
+    """引用検索のスクロールJS。popularは末尾まで送り、recentは従来どおり既定のスクロール。"""
+    return QUOTE_SEARCH_SCROLL_SCRIPT if sort == SORT_POPULAR else SCROLL_SCRIPT
 
 
 def build_x_top_sections(
@@ -388,6 +396,7 @@ def collect_timeline_relation(
     max_items: int,
     wait_range: tuple[float, float],
     collected: dict[str, Post],
+    scroll_script: str = SCROLL_SCRIPT,
 ) -> Exception | None:
     """②③共通: SearchTimeline/UserTweetsを傍受し収集分をcollectedへマージする。
 
@@ -410,7 +419,8 @@ def collect_timeline_relation(
     try:
         page.goto(goto_url, wait_until="domcontentloaded")
         posts = scroll_and_collect(
-            page, capture, parse, max_items=max_items, wait_seconds_range=wait_range
+            page, capture, parse, max_items=max_items, wait_seconds_range=wait_range,
+            scroll_script=scroll_script,
         )
         merge_posts(collected, posts, exclude_id=start_id)
         return None
@@ -495,6 +505,7 @@ def run(args: argparse.Namespace) -> int:
                             context, quote_url, "SearchTimeline",
                             build_source_query(start_id, RELATION_QUOTE),
                             start_id, max_items, wait_range, collected,
+                            scroll_script=quote_scroll_script(args.sort),
                         )
 
                 # ③同一投稿者
