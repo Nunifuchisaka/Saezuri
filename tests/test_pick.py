@@ -86,3 +86,35 @@ def test_render_markdown():
     assert "あ" * 100 + "…" in out
     assert "あ" * 101 not in out
     assert post.url in out
+
+
+def _with_source(post, source_query):
+    post.source_query = source_query
+    return post
+
+
+def test_post_kind_from_related_source_query():
+    assert pick.post_kind(_with_source(make("1", SEP), "related:123:reply")) == "reply"
+    assert pick.post_kind(_with_source(make("1", SEP), "related:123:quote")) == "quote"
+    assert pick.post_kind(_with_source(make("1", SEP), "ig-related:AbC_-1:comment")) == "comment"
+    assert pick.post_kind(_with_source(make("1", SEP), "th-related:AbC:quote")) == "quote"
+    # 関連収集以外のsource_query(検索クエリ等)は末尾が一致しても種別なし
+    assert pick.post_kind(_with_source(make("1", SEP), "from:foo reply")) is None
+    assert pick.post_kind(_with_source(make("1", SEP), "q since:reply")) is None
+    assert pick.post_kind(make("1", SEP)) is None
+
+
+def test_filter_by_kinds():
+    posts = [
+        _with_source(make("1", SEP), "related:9:reply"),
+        _with_source(make("2", SEP), "related:9:quote"),
+        _with_source(make("3", SEP), "ig-related:Ab:comment"),
+        _with_source(make("4", SEP), "VRChat"),
+    ]
+    assert [p.id for p in pick.filter_posts(posts, kinds=["reply", "comment"])] == ["1", "3"]
+    assert [p.id for p in pick.filter_posts(posts, kinds=[])] == ["1", "2", "3", "4"]
+
+
+def test_kind_option_parses_multiple():
+    args = pick.build_arg_parser().parse_args(["a.jsonl", "--kind", "reply", "--kind", "quote"])
+    assert args.kind == ["reply", "quote"]

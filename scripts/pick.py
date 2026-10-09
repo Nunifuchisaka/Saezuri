@@ -7,6 +7,7 @@ Playwright非依存で、Xへのアクセスは一切行わない。
 使用例:
     python scripts/pick.py data/raw/search_*.jsonl --handle aichan_nel --exclude-reposts --since 2026-01-01 --top-per month --top 3
     python scripts/pick.py data/raw/*.jsonl --keyword VRChat --keyword 配信 --format jsonl
+    python scripts/pick.py data/raw/related_*.jsonl --kind reply --top 10
 
 --since/--until はJST基準の日付で、両端とも含む(--until 2026-03-31 は3/31分まで)。
 終了コード: 0=正常 / 1=入力エラー
@@ -17,6 +18,7 @@ import argparse
 import glob
 import json
 import logging
+import re
 import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -30,6 +32,10 @@ logger = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9))
 X_DATETIME_FORMAT = "%a %b %d %H:%M:%S %z %Y"
 SUMMARY_LENGTH = 100
+
+# 関連収集(related.py / ig_related.py / th_related.py)のsource_query: <接頭辞>:<起点>:<種別>
+KINDS = ("reply", "quote", "comment")
+_KIND_SOURCE_RE = re.compile(r"^(?:related|ig-related|th-related):[^:]+:(\w+)$")
 
 
 def parse_date_arg(value: str) -> date:
@@ -81,6 +87,12 @@ def load_posts(paths: list[str]) -> list[Post]:
     return posts
 
 
+def post_kind(post: Post) -> str | None:
+    """関連収集のsource_query末尾から種別(reply/quote/comment等)を返す。関連収集以外はNone。"""
+    match = _KIND_SOURCE_RE.match(post.source_query or "")
+    return match.group(1) if match else None
+
+
 def matches_keywords(post: Post, keywords: list[str]) -> bool:
     """keywordsのいずれかがtext/記事タイトル/記事本文に含まれるか(大文字小文字無視)。空ならTrue。"""
     if not keywords:
@@ -96,6 +108,7 @@ def filter_posts(
     since: date | None = None,
     until: date | None = None,
     exclude_reposts: bool = False,
+    kinds: list[str] | None = None,
 ) -> list[Post]:
     handle_norm = handle.lstrip("@").lower() if handle else None
     result = []
@@ -103,6 +116,8 @@ def filter_posts(
         if handle_norm and post.author_handle.lower() != handle_norm:
             continue
         if exclude_reposts and post.is_repost:
+            continue
+        if kinds and post_kind(post) not in kinds:
             continue
         if not matches_keywords(post, keywords or []):
             continue
@@ -197,6 +212,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--until", type=parse_date_arg, default=None, metavar="YYYY-MM-DD",
                         help="この日(JST)まで(含む)")
     parser.add_argument("--exclude-reposts", action="store_true", help="リポストを除外する")
+    parser.add_argument("--kind", action="append", choices=KINDS, default=[],
+                        help="関連収集の種別で絞る(source_query末尾で判別。複数指定はOR)")
     parser.add_argument("--top-per", choices=("month", "none"), default="none",
                         help="month=月ごとに上位--top件 / none=全体(--top指定時は全体の上位)。既定: none")
     parser.add_argument("--top", type=int, default=None, metavar="N", help="エンゲージメント上位N件")
@@ -220,7 +237,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     posts = filter_posts(
-        load_posts(paths), args.handle, args.keyword, args.since, args.until, args.exclude_reposts
+        load_posts(paths), args.handle, args.keyword, args.since, args.until, args.exclude_reposts,
+        args.kind,
     )
     picked = select_top(posts, args.top_per, args.top)
     output = render_jsonl(picked) if args.format == "jsonl" else render_markdown(picked)
