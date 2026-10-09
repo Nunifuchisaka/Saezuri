@@ -43,3 +43,18 @@ def test_from_dict_missing_article_keys_defaults_to_none():
     restored = Post.from_dict(data)
     assert restored.article_title is None
     assert restored.article_text is None
+
+
+def test_in_reply_to_id_roundtrip_and_position():
+    post = _minimal_post(in_reply_to_id="100", quoted_id="200")
+    data = post.to_dict()
+    keys = list(data.keys())
+    assert keys.index("in_reply_to_id") == keys.index("quoted_id") + 1
+    assert Post.from_dict(data).in_reply_to_id == "100"
+
+
+def test_from_dict_missing_in_reply_to_id_defaults_to_none():
+    """in_reply_to_idキーを持たない既存JSONLでも壊れないこと。"""
+    data = _minimal_post().to_dict()
+    del data["in_reply_to_id"]
+    assert Post.from_dict(data).in_reply_to_id is None

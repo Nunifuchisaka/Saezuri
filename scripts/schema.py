@@ -39,6 +39,7 @@ class Post:
     source_query: Optional[str] = None
     article_title: Optional[str] = None
     article_text: Optional[str] = None
+    in_reply_to_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         """設計書記載の項目順でJSONL保存用の辞書に変換する"""
@@ -59,6 +60,7 @@ class Post:
             "media": [asdict(m) for m in self.media],
             "is_repost": self.is_repost,
             "quoted_id": self.quoted_id,
+            "in_reply_to_id": self.in_reply_to_id,
             "source_query": self.source_query,
             "collected_at": self.collected_at,
         }
@@ -84,6 +86,7 @@ class Post:
             media=media,
             is_repost=data.get("is_repost", False),
             quoted_id=data.get("quoted_id"),
+            in_reply_to_id=data.get("in_reply_to_id"),
             source_query=data.get("source_query"),
             collected_at=data["collected_at"],
         )

@@ -403,6 +403,7 @@ def _parse_tweet_result(
         media=_parse_media(legacy),
         is_repost="retweeted_status_result" in legacy,
         quoted_id=legacy.get("quoted_status_id_str"),
+        in_reply_to_id=legacy.get("in_reply_to_status_id_str"),
         source_query=source_query,
         collected_at=collected_at,
     )
