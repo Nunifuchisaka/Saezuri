@@ -564,6 +564,7 @@ def scroll_and_collect(
     wait_seconds_range: tuple[float, float] = DEFAULT_WAIT_SECONDS_RANGE,
     max_idle_rounds: int = DEFAULT_MAX_IDLE_ROUNDS,
     key_fn: Callable[[Any], Optional[str]] = _default_key,
+    scroll_script: str = SCROLL_SCRIPT,
 ) -> list:
     """上限に達するまで「捕捉分の取り出し→スクロール→ランダム待機」を繰り返す。
 
@@ -572,6 +573,8 @@ def scroll_and_collect(
     - max_items: 上限件数(config.yamlのmax_itemsを渡す)。達したら停止し切り詰めて返す
     - wait_seconds_range: スクロール間のランダム待機秒(config.yamlのwait_seconds)
     - max_idle_rounds: 新規アイテムなしがこの回数続いたら末尾到達とみなし停止
+    - scroll_script: スクロールに使うJS。既定はウィンドウ全体のスクロールで、内部の
+      スクロールコンテナで追加読み込みするページ(Instagramのコメント欄等)は差し替える
     - 429検知でRateLimitedError、チャレンジ画面検知でChallengeDetectedErrorを送出
 
     呼び出し前にcapture.attach(page)とpage.goto(対象URL)を済ませておくこと。
@@ -610,6 +613,6 @@ def scroll_and_collect(
         else:
             idle_rounds = 0
 
-        page.evaluate(SCROLL_SCRIPT)
+        page.evaluate(scroll_script)
         wait_ms = random.uniform(*wait_seconds_range) * 1000
         page.wait_for_timeout(wait_ms)

@@ -19,10 +19,11 @@ Threadsの内部API仕様は非公開かつ予告なく変わるため、パー�
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from typing import Any, Iterable, Optional
 
 from playwright.sync_api import BrowserContext, Page
@@ -34,6 +35,8 @@ from instagram import (
     _parse_v1_media_list,
     _timestamp_to_iso,
     _to_int,
+    load_embedded_json,
+    pk_to_shortcode,
 )
 from schema import Post
 from session import SessionExpiredError
@@ -64,13 +67,12 @@ ENDPOINT_PATTERNS = (
     (re.compile(r"https://(?:www\.)?threads\.(?:com|net)/api/graphql"), "api_graphql"),
 )
 
-# ページ埋め込みJSONのうち、投稿データを含みうるものだけを取り出すJS
-# (巨大なページで無関係なJSONまでPython側に渡さないよう、目印の文字列で絞る)
-EMBEDDED_JSON_SCRIPT = """
-() => Array.from(document.querySelectorAll('script[type="application/json"]'))
-  .map(el => el.textContent || '')
-  .filter(text => text.includes('text_post_app_info'))
-"""
+# ページ埋め込みJSONのうち、投稿データを含みうるものだけを取り出すための目印
+# (巨大なページで無関係なJSONまでPython側に渡さないよう、この文字列を含むものに絞る)
+EMBEDDED_JSON_MARKER = "text_post_app_info"
+
+# 投稿URL(threads.com/@<username>/post/<code>)からユーザー名・codeを取り出す
+POST_URL_RE = re.compile(r"threads\.(?:com|net)/@([^/?#]+)/post/([A-Za-z0-9_-]+)")
 
 
 # ---------------------------------------------------------------------------
@@ -172,10 +174,6 @@ class ThreadsCapture(InstagramCapture):
     service_name = "Threads"
     relogin_message = RELOGIN_MESSAGE
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._injected: list[tuple[str, dict]] = []
-
     def endpoint_name(self, url: str) -> Optional[str]:
         return extract_threads_endpoint_name(url)
 
@@ -185,35 +183,13 @@ class ThreadsCapture(InstagramCapture):
     def is_challenge_url(self, url: str) -> bool:
         return is_threads_challenge_url(url)
 
-    def inject(self, endpoint: str, payload: dict) -> None:
-        """APIレスポンス以外(ページ埋め込みJSON等)のペイロードを次のdrain()に載せる。"""
-        self._injected.append((endpoint, payload))
-
-    def drain(self) -> list[tuple[str, dict]]:
-        injected, self._injected = self._injected, []
-        return injected + super().drain()
-
 
 def load_embedded_payloads(page: Page) -> list[dict]:
     """ページ内の<script type="application/json">から投稿データを含むJSONを取り出す。
 
     読み出し・パースに失敗したものは警告を出してスキップする(全体は落とさない)。
     """
-    try:
-        texts = page.evaluate(EMBEDDED_JSON_SCRIPT)
-    except Exception as exc:
-        logger.warning("embedded: ページ埋め込みJSONの読み出しに失敗しました: %s", exc)
-        return []
-    payloads: list[dict] = []
-    for text in texts or []:
-        try:
-            payload = json.loads(text)
-        except (TypeError, ValueError) as exc:
-            logger.warning("embedded: JSONのパースに失敗したため1件スキップします: %s", exc)
-            continue
-        if isinstance(payload, dict):
-            payloads.append(payload)
-    return payloads
+    return load_embedded_json(page, EMBEDDED_JSON_MARKER)
 
 
 # ---------------------------------------------------------------------------
@@ -322,3 +298,144 @@ def parse_threads_payload(
         if post is not None:
             posts.append(post)
     return posts
+
+
+# ---------------------------------------------------------------------------
+# 起点投稿へのリプライ・引用(th_related.py用)
+# ---------------------------------------------------------------------------
+
+def parse_threads_post_url(url: str) -> tuple[str, str]:
+    """Threadsの投稿URLから(ユーザー名, code)を取り出す。解釈できないURLはValueError。"""
+    match = POST_URL_RE.search(url)
+    if match is None:
+        raise ValueError(f"Threadsの投稿URLとして解釈できません: {url!r}")
+    return match.group(1), match.group(2)
+
+
+def build_threads_post_url(username: str, code: str) -> str:
+    return f"https://www.threads.com/@{username}/post/{code}"
+
+
+def _iter_posts_with_replies(payload: Any) -> Iterable[dict]:
+    """iter_threads_postsと同じだが、見つけた投稿ノードのdirect_replies配下にだけは潜る。
+
+    起点ノード自体が返信一覧(text_post_app_info.direct_replies)を抱えた形で届いても
+    返信を取りこぼさないため。引用元投稿・カルーセル子要素には潜らない。
+    """
+    if isinstance(payload, dict):
+        if _is_threads_post(payload):
+            yield payload
+            replies = payload["text_post_app_info"].get("direct_replies")
+            if replies is not None:
+                yield from _iter_posts_with_replies(replies)
+            return
+        for value in payload.values():
+            yield from _iter_posts_with_replies(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            yield from _iter_posts_with_replies(value)
+
+
+def parse_threads_replies(
+    payload: dict,
+    endpoint: str = "",
+    origin_pk: str = "",
+    origin_handle: str = "",
+    source_query: Optional[str] = None,
+    collected_at: Optional[str] = None,
+) -> list[Post]:
+    """投稿ページの返信(埋め込みJSON・BarcelonaPostPageDirectRepliesRefetchQuery)をPostへ正規化する。
+
+    is_replyが真の投稿ノードだけを返す(起点自身・おすすめ等の非返信は除く)。
+    Threadsの返信ノードには返信先の投稿IDが無いため、reply_level == 1 かつ
+    reply_to_author が起点投稿者のものだけ in_reply_to_id に起点pkを補う(ペイロードに無い値を補っている)。
+    それ以外(孫返信等)は親が特定できないため in_reply_to_id = None。
+    """
+    collected_at = collected_at or now_iso()
+    origin_norm = origin_handle.lstrip("@").lower()
+    posts: list[Post] = []
+    for node in _iter_posts_with_replies(payload):
+        if _post_pk(node) == origin_pk:
+            continue
+        info = node["text_post_app_info"]
+        if not info.get("is_reply"):
+            continue
+        post = _parse_threads_node(node, endpoint, source_query, collected_at, None)
+        if post is None:
+            continue
+        reply_to = (_dig(info, "reply_to_author", "username") or "").lower()
+        if info.get("reply_level") == 1 and origin_norm and reply_to == origin_norm:
+            post.in_reply_to_id = origin_pk
+        posts.append(post)
+    return posts
+
+
+def find_threads_post(
+    payloads: list[dict],
+    code: Optional[str] = None,
+    pk: Optional[str] = None,
+    endpoint: str = "embedded",
+    source_query: Optional[str] = None,
+    collected_at: Optional[str] = None,
+) -> Optional[Post]:
+    """payloads中からcode(またはpk)が一致する投稿ノードを探してPostにする。無ければNone。"""
+    collected_at = collected_at or now_iso()
+    for payload in payloads:
+        for node in iter_threads_posts(payload):
+            if (code is not None and node.get("code") == code) or (pk is not None and _post_pk(node) == pk):
+                return _parse_threads_node(node, endpoint, source_query, collected_at, None)
+    return None
+
+
+@dataclass
+class ThreadsQuoteRef:
+    """「アクティビティを見る」の引用一覧の1件(いいね数は無いので投稿を開いて取り直す)。"""
+
+    pk: str
+    username: str
+    shortcode: str
+
+    @property
+    def url(self) -> str:
+        return build_threads_post_url(self.username, self.shortcode)
+
+
+def _is_quote_activity(node: dict) -> bool:
+    return isinstance(node.get("destination"), str) and _dig(node, "extra", "icon_name") == "quote"
+
+
+def _iter_quote_activities(payload: Any) -> Iterable[dict]:
+    if isinstance(payload, dict):
+        if _is_quote_activity(payload):
+            yield payload
+            return
+        for value in payload.values():
+            yield from _iter_quote_activities(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            yield from _iter_quote_activities(value)
+
+
+def parse_feedback_quote_items(payload: dict, endpoint: str = "") -> list[ThreadsQuoteRef]:
+    """引用一覧(BarcelonaFeedbackHubTabQuery / DialogQueryのpost_activity)から引用投稿の参照を取り出す。
+
+    destination(media?id=<pk>_<ユーザーID>&shortcode=<code>)からpkとshortcodeを読む。
+    shortcodeが無ければpkから変換する。投稿者(actor.username)が無い項目は警告してスキップする。
+    """
+    refs: list[ThreadsQuoteRef] = []
+    for node in _iter_quote_activities(payload):
+        query = parse_qs(urlsplit(node["destination"]).query)
+        pk = (query.get("id") or [""])[0].split("_")[0] or str(node.get("pk") or "")
+        username = _dig(node, "actor", "username")
+        if not pk or not username:
+            logger.warning("%s: 引用一覧の項目にpk/投稿者が無いため1件スキップします", endpoint)
+            continue
+        shortcode = (query.get("shortcode") or [""])[0]
+        if not shortcode:
+            try:
+                shortcode = pk_to_shortcode(pk)
+            except ValueError:
+                logger.warning("%s: 引用投稿のpkが数値でないため1件スキップします(pk=%s)", endpoint, pk)
+                continue
+        refs.append(ThreadsQuoteRef(pk=pk, username=username, shortcode=shortcode))
+    return refs

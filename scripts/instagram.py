@@ -18,6 +18,7 @@ Instagramの内部API仕様は非公開かつ予告なく変わるため、パ�
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -69,6 +70,19 @@ MEDIA_TYPE_CAROUSEL = 8
 
 # ストーリーズ(ハイライト含む)は投稿ではないため収集対象外
 EXCLUDED_PRODUCT_TYPES = ("story",)
+
+# 投稿URL(/p/<code>/、/reel/<code>/、/<user>/p/<code>/)からshortcodeを取り出す
+POST_URL_RE = re.compile(r"instagram\.com/(?:[^/?#]+/)?(?:p|reels?|tv)/([A-Za-z0-9_-]+)")
+
+# shortcodeはメディアpkを64進数で表したもの(Threadsのcodeも同じ方式)
+SHORTCODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+# ページ埋め込みJSON(<script type="application/json">)のうち、markerを含むものだけを返すJS
+EMBEDDED_JSON_BY_MARKER_SCRIPT = """
+(marker) => Array.from(document.querySelectorAll('script[type="application/json"]'))
+  .map(el => el.textContent || '')
+  .filter(text => text.includes(marker))
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +160,41 @@ def require_instagram_login(context: BrowserContext) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 投稿URL・ID
+# ---------------------------------------------------------------------------
+
+def parse_instagram_post_url(url: str) -> str:
+    """Instagramの投稿URLからshortcodeを取り出す。解釈できないURLはValueError。"""
+    match = POST_URL_RE.search(url)
+    if match is None:
+        raise ValueError(f"Instagramの投稿URLとして解釈できません: {url!r}")
+    return match.group(1)
+
+
+def shortcode_to_pk(shortcode: str) -> str:
+    """shortcodeをメディアpk(10進数の文字列)に変換する。不正な文字を含む・空ならValueError。"""
+    if not shortcode:
+        raise ValueError("shortcodeが空です")
+    value = 0
+    for char in shortcode:
+        index = SHORTCODE_ALPHABET.find(char)
+        if index < 0:
+            raise ValueError(f"shortcodeに使えない文字が含まれています: {shortcode!r}")
+        value = value * 64 + index
+    return str(value)
+
+
+def pk_to_shortcode(pk: str | int) -> str:
+    """メディアpkをshortcodeに変換する(shortcode_to_pkの逆変換)。"""
+    value = int(pk)
+    chars = []
+    while value:
+        value, index = divmod(value, 64)
+        chars.append(SHORTCODE_ALPHABET[index])
+    return "".join(reversed(chars)) or SHORTCODE_ALPHABET[0]
+
+
+# ---------------------------------------------------------------------------
 # レスポンス捕捉
 # ---------------------------------------------------------------------------
 
@@ -183,6 +232,7 @@ class InstagramCapture(GraphQLCapture):
     def __init__(self) -> None:
         super().__init__(operations=())
         self._challenge = False
+        self._injected: list[tuple[str, dict]] = []
 
     def endpoint_name(self, url: str) -> Optional[str]:
         """捕捉対象URLならエンドポイント名を返す。サブクラスで差し替える。"""
@@ -207,9 +257,16 @@ class InstagramCapture(GraphQLCapture):
             return
         self._pending.append((endpoint, response))
 
+    def inject(self, endpoint: str, payload: dict) -> None:
+        """APIレスポンス以外(ページ埋め込みJSON等)のペイロードを次のdrain()に載せる。"""
+        self._injected.append((endpoint, payload))
+
     def drain(self) -> list[tuple[str, dict]]:
-        """GraphQLCapture.drain()に加え、チャレンジ要求の本文を検知したらフラグを立てる。"""
-        results: list[tuple[str, dict]] = []
+        """GraphQLCapture.drain()に加え、チャレンジ要求の本文を検知したらフラグを立てる。
+
+        inject()で差し込んだペイロードはAPIレスポンスより先に返す。
+        """
+        results, self._injected = self._injected, []
         for endpoint, payload in super().drain():
             if payload_requests_challenge(payload):
                 logger.warning("%s: チャレンジ(checkpoint)要求を検知しました", endpoint)
@@ -228,6 +285,29 @@ class InstagramCapture(GraphQLCapture):
             )
         if page is not None and self.is_login_url(page.url):
             raise SessionExpiredError(self.relogin_message)
+
+
+def load_embedded_json(page: Page, marker: str) -> list[dict]:
+    """ページ内の<script type="application/json">のうちmarkerを含むJSONを取り出す。
+
+    初回表示分はAPIではなくこの埋め込みJSONで届く(Instagramのコメント・Threadsの投稿)。
+    読み出し・パースに失敗したものは警告を出してスキップする(全体は落とさない)。
+    """
+    try:
+        texts = page.evaluate(EMBEDDED_JSON_BY_MARKER_SCRIPT, marker)
+    except Exception as exc:
+        logger.warning("embedded: ページ埋め込みJSONの読み出しに失敗しました: %s", exc)
+        return []
+    payloads: list[dict] = []
+    for text in texts or []:
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError) as exc:
+            logger.warning("embedded: JSONのパースに失敗したため1件スキップします: %s", exc)
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
 
 
 # ---------------------------------------------------------------------------
@@ -430,4 +510,67 @@ def parse_instagram_payload(
             post = _parse_graph_node(node, endpoint, default_handle, source_query, collected_at)
         if post is not None:
             posts.append(post)
+    return posts
+
+
+def _is_comment_node(node: dict) -> bool:
+    """コメントノードらしいか(pk + created_at + comment_like_count)。投稿(メディア)ノードとはキーで区別する。"""
+    return "pk" in node and "created_at" in node and "comment_like_count" in node
+
+
+def iter_comment_nodes(payload: Any) -> Iterable[dict]:
+    """ペイロードからコメントノードを再帰探索で順に取り出す(見つけたノードの内側には潜らない)。"""
+    if isinstance(payload, dict):
+        if _is_comment_node(payload):
+            yield payload
+            return
+        for value in payload.values():
+            yield from iter_comment_nodes(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            yield from iter_comment_nodes(value)
+
+
+def parse_instagram_comments(
+    payload: dict,
+    endpoint: str = "",
+    media_pk: str = "",
+    code: str = "",
+    source_query: Optional[str] = None,
+    collected_at: Optional[str] = None,
+) -> list[Post]:
+    """投稿ページのコメント(埋め込みJSON・PolarisPostCommentsPaginationQuery等)をPostへ正規化する。
+
+    - url は /p/<code>/c/<コメントpk>/、like_count は comment_like_count、reply_count は返信数
+    - in_reply_to_id: トップレベルコメント(parent_comment_idがnull)は起点投稿のmedia_pk。
+      コメントノード自体には投稿IDが入っていないため呼び出し元から渡された値で補う。
+      子コメント(返信)は parent_comment_id を入れる
+    """
+    collected_at = collected_at or now_iso()
+    posts: list[Post] = []
+    for node in iter_comment_nodes(payload):
+        comment_pk = str(node.get("pk") or "")
+        if not comment_pk:
+            logger.warning("%s: コメントのpkが空のため1件スキップします", endpoint)
+            continue
+        handle = _dig(node, "user", "username")
+        if not handle:
+            logger.warning("%s: コメント投稿者(username)が見つからないため1件スキップします(pk=%s)", endpoint, comment_pk)
+            continue
+        parent = node.get("parent_comment_id")
+        posts.append(Post(
+            id=comment_pk,
+            url=f"https://www.instagram.com/p/{code}/c/{comment_pk}/",
+            author_handle=handle,
+            author_name=_dig(node, "user", "full_name") or "",
+            created_at=_timestamp_to_iso(node.get("created_at")),
+            text=node.get("text") or "",
+            like_count=_to_int(node.get("comment_like_count")),
+            repost_count=0,
+            reply_count=_to_int(node.get("child_comment_count")),
+            quote_count=0,
+            in_reply_to_id=str(parent) if parent else media_pk,
+            source_query=source_query,
+            collected_at=collected_at,
+        ))
     return posts
