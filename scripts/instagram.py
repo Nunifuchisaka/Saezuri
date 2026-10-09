@@ -232,7 +232,6 @@ class InstagramCapture(GraphQLCapture):
     def __init__(self) -> None:
         super().__init__(operations=())
         self._challenge = False
-        self._injected: list[tuple[str, dict]] = []
 
     def endpoint_name(self, url: str) -> Optional[str]:
         """捕捉対象URLならエンドポイント名を返す。サブクラスで差し替える。"""
@@ -257,16 +256,9 @@ class InstagramCapture(GraphQLCapture):
             return
         self._pending.append((endpoint, response))
 
-    def inject(self, endpoint: str, payload: dict) -> None:
-        """APIレスポンス以外(ページ埋め込みJSON等)のペイロードを次のdrain()に載せる。"""
-        self._injected.append((endpoint, payload))
-
     def drain(self) -> list[tuple[str, dict]]:
-        """GraphQLCapture.drain()に加え、チャレンジ要求の本文を検知したらフラグを立てる。
-
-        inject()で差し込んだペイロードはAPIレスポンスより先に返す。
-        """
-        results, self._injected = self._injected, []
+        """GraphQLCapture.drain()に加え、チャレンジ要求の本文を検知したらフラグを立てる。"""
+        results: list[tuple[str, dict]] = []
         for endpoint, payload in super().drain():
             if payload_requests_challenge(payload):
                 logger.warning("%s: チャレンジ(checkpoint)要求を検知しました", endpoint)

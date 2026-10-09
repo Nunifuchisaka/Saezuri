@@ -17,3 +17,10 @@ def test_別名対象外のオペレーションは捕捉しない():
 def test_SearchTimeline指定に別名は混ざらない():
     capture = GraphQLCapture(operations=("SearchTimeline",))
     assert not capture.matches("UserOriginalsTimeline")
+
+
+def test_inject分はdrainで先に一度だけ返る():
+    capture = GraphQLCapture(operations=("TweetDetail",))
+    capture.inject("TweetDetail", {"a": 1})
+    assert capture.drain() == [("TweetDetail", {"a": 1})]
+    assert capture.drain() == []

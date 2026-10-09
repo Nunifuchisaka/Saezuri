@@ -137,6 +137,7 @@ class GraphQLCapture:
             self._operations.update(OPERATION_ALIASES.get(operation, ()))
         self._operation_keywords = tuple(operation_keywords)
         self._pending: list[tuple[str, Response]] = []
+        self._injected: list[tuple[str, dict]] = []
         self._rate_limited = False
 
     def matches(self, operation: str) -> bool:
@@ -181,14 +182,18 @@ class GraphQLCapture:
                 "自動突破は行いません。ブラウザで手動対応してください。"
             )
 
+    def inject(self, operation: str, payload: dict) -> None:
+        """レスポンス以外(ページ埋め込みJSON・読み出し済みペイロード等)を次のdrain()に載せる。"""
+        self._injected.append((operation, payload))
+
     def drain(self) -> list[tuple[str, dict]]:
         """溜まった分のJSONペイロードを(オペレーション名, dict)のリストで取り出す。
 
-        取り出した分は内部バッファから消える。本文の読み出しに失敗した
-        レスポンスは警告を出してスキップする(落とさない)。
+        取り出した分は内部バッファから消える。inject()で差し込んだ分はレスポンスより先に返す。
+        本文の読み出しに失敗したレスポンスは警告を出してスキップする(落とさない)。
         """
         pending, self._pending = self._pending, []
-        results: list[tuple[str, dict]] = []
+        results, self._injected = self._injected, []
         for operation, response in pending:
             try:
                 payload = response.json()

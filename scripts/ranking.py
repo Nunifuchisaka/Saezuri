@@ -41,14 +41,19 @@ def rank_by_likes(
     return sorted(targets, key=lambda p: p.like_count, reverse=True)[:top]
 
 
-def count_targets(
+def build_sections(
     posts: list[Post],
-    is_target: Callable[[Post], bool],
+    specs: list[tuple[str, Callable[[Post], bool]]],
     origin_id: str,
     origin_handle: Optional[str],
-) -> int:
-    """rank_by_likesの対象になる件数(上位で切り詰める前)を返す。"""
-    return len(rank_by_likes(posts, is_target, origin_id, origin_handle, top=len(posts)))
+    top: int,
+) -> list[tuple[str, list[Post], int]]:
+    """specs=[(種別の見出し, 対象判定), ...]ごとに(見出し, 上位top件, 対象件数)を返す。"""
+    sections = []
+    for label, is_target in specs:
+        targets = rank_by_likes(posts, is_target, origin_id, origin_handle, top=len(posts))
+        sections.append((label, targets[:top], len(targets)))
+    return sections
 
 
 def render_line(rank: int, post: Post) -> str:
@@ -67,6 +72,7 @@ def render_top_markdown(
     origin_handle: Optional[str],
     generated_at: str,
     sections: list[tuple[str, list[Post], int]],
+    notes: Optional[list[str]] = None,
 ) -> str:
     """sections=[(種別の見出し, 上位の投稿リスト, 対象件数), ...]からMarkdown全体を作る。"""
     lines = [
@@ -78,6 +84,7 @@ def render_top_markdown(
         "- 並び: いいね数の降順(起点への直接の返信/コメント・引用のみ。起点投稿者本人の投稿は除外)",
         "- 本文は先頭100字の要約のみ。全文は各URLを参照",
     ]
+    lines.extend(f"- {note}" for note in notes or [])
     for label, posts, total in sections:
         lines.extend(["", f"## {label}(対象{total}件中 上位{len(posts)}件)", ""])
         if not posts:

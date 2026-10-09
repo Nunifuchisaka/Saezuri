@@ -95,3 +95,26 @@ def test_write_top_markdown_creates_dir_and_overwrites(tmp_path: Path):
     ranking.write_top_markdown(path, "old")
     ranking.write_top_markdown(path, "new")
     assert path.read_text(encoding="utf-8") == "new"
+
+
+def test_build_sections_counts_and_ranks():
+    posts = [make("2", 5, in_reply_to="1"), make("3", 8, in_reply_to="1"),
+             make("4", 9, quoted="1", kind="quote"), make("5", 1, in_reply_to="2")]
+    sections = ranking.build_sections(
+        posts,
+        [("リプライ", lambda p: p.in_reply_to_id == "1"), ("引用", lambda p: p.quoted_id == "1")],
+        origin_id="1", origin_handle="origin", top=1,
+    )
+    assert [(label, [p.id for p in ranked], total) for label, ranked, total in sections] == [
+        ("リプライ", ["3"], 2),
+        ("引用", ["4"], 1),
+    ]
+
+
+def test_render_top_markdown_notes():
+    text = ranking.render_top_markdown(
+        title="t", origin_url="u", origin_handle=None, generated_at="g",
+        sections=[], notes=["収集は途中で中断されました"],
+    )
+    assert "- 起点投稿者: 不明(本人除外なし)" in text
+    assert "- 収集は途中で中断されました" in text
