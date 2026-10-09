@@ -15,6 +15,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
   - [x_profiles.py（アカウントのフォロワー数等取得）](#x_profilespyアカウントのフォロワー数等取得)
   - [th_profiles.py（Threadsアカウントのフォロワー数等取得）](#th_profilespythreadsアカウントのフォロワー数等取得)
   - [tweet.py（単一ツイート取得）](#tweetpy単一ツイート取得)
+  - [related.py／ig_related.py／th_related.py（起点投稿のリプライ・引用・コメントといいね数上位）](#relatedpyig_relatedpyth_relatedpy起点投稿のリプライ引用コメントといいね数上位)
   - [trends.py（トレンド把握）](#trendspyトレンド把握)
   - [bookmarks.py（サブ垢自身のブックマーク収集）](#bookmarkspyサブ垢自身のブックマーク収集)
   - [digest.py（Markdownダイジェスト生成）](#digestpymarkdownダイジェスト生成)
@@ -153,6 +154,7 @@ python scripts/pick.py data/raw/search_*.jsonl --handle aichan_nel --exclude-rep
 | `--keyword` | `text`／記事本文の部分一致（複数指定はOR・大文字小文字無視） |
 | `--since` / `--until` | `YYYY-MM-DD`（JST基準・両端含む） |
 | `--exclude-reposts` | リポストを除外 |
+| `--kind reply\|quote\|comment` | 関連収集（`related.py`／`ig_related.py`／`th_related.py`）の種別で絞る。`source_query`の末尾で判別（複数指定はOR） |
 | `--top-per month\|none` / `--top N` | 月ごと（または全体）のエンゲージメント（like+repost+reply+quote）上位N件 |
 | `--format md\|jsonl` | 出力形式（既定: `md`。月見出し→日付(JST)・エンゲージメント・本文先頭100字・URL） |
 
@@ -226,6 +228,42 @@ python scripts/tweet.py --id 1234567890
 対象ツイートが引用ツイートの場合、`quoted_status_result`として同梱されている引用元投稿も追加リクエストなしで同時に取得し、同じJSONLファイルに2件目のレコード(`source_query`は`quoted-by:<起点投稿id>`)として保存する。標準出力にも起点投稿に続けて引用元投稿を表示する。引用元が削除済み・非公開等で取得できない場合はエラーにせず、起点投稿のみを保存して正常終了する。
 
 起点投稿・引用元投稿いずれかがX Article（長文記事）へのリンクの場合、記事タイトル・本文もあわせて取得する。これも`TweetDetail`のレスポンスに既に同梱されているデータを解析するだけで、追加のGraphQLリクエストは発生しない。記事本文はプレーンテキスト化して保存する（太字等の装飾・箇条書き記号は失われる）。記事でない通常の投稿では従来通り影響しない。
+
+### related.py／ig_related.py／th_related.py（起点投稿のリプライ・引用・コメントといいね数上位）
+
+起点となる1投稿に付いたリプライ・引用・コメントを集め、全件をJSONLに保存する。あわせて、起点への**直接の**返信/コメントと引用（起点投稿者本人のもの・返信への返信は除く）を**いいね数のみ**の降順で並べた上位N件をMarkdownに書き出す。SNS側の人気順表示で集めてから手元で並べ直す（各SNSの人気順はいいね数順と一致しないため）。
+
+```
+python scripts/related.py --url https://x.com/foo/status/1234567890            # X(リプライ+引用+同一投稿者)
+python scripts/related.py --id 1234567890 --replies --quotes --top 20
+python scripts/related.py --id 1234567890 --sort recent                        # 従来の表示順で収集のみ
+python scripts/ig_related.py --url https://www.instagram.com/p/XXXXXXXXXXX/    # Instagramのコメント
+python scripts/th_related.py --url https://www.threads.com/@foo/post/XXXXXXXXXXX  # Threadsのリプライ+引用
+```
+
+| オプション | 説明 |
+|---|---|
+| `--url` | 起点投稿のURL（`related.py`は`--id`でも可。`ig_related.py`／`th_related.py`は必須） |
+| `--max` | 種別ごとの取得上限（既定: `config.yaml`の`max_items`）。Xの引用は話題・最新それぞれの上限、Threadsの引用は開く投稿数の上限 |
+| `--top` | Markdownに出す種別ごとの上位件数（既定: 10） |
+| `--sort popular\|recent` | `related.py`のみ。既定`popular`。`recent`は従来の表示順で収集し、Markdownは出さない |
+| `--replies` / `--quotes` / `--author` / `--unseen-only` | `related.py`のみ（従来どおり。`--author`の同一投稿者はランキング対象外） |
+| `--config` / `--browser` / `--headed` | 他スクリプトと同じ |
+
+人気順への切り替えと直接返信の判定：
+
+| SNS | 収集 | 人気順への切り替え | 直接の返信の判定 |
+|---|---|---|---|
+| X（リプライ） | 投稿詳細の会話スレッド（`TweetDetail`） | 会話スレッドの並び替えメニューで「いいね」を選ぶ | `in_reply_to_id == 起点ID` |
+| X（引用） | `quoted_tweet_id:<id>`検索の話題(`f=top`)と最新(`f=live`)を合算 | 検索タブのURL | `quoted_id == 起点ID` |
+| Instagram（コメント） | 投稿ページの埋め込みJSON＋コメント欄スクロール | Web版に並び替えが無いため既定（人気順）のまま | トップレベルコメント（`in_reply_to_id`＝起点のメディアID） |
+| Threads（リプライ） | 投稿ページの埋め込みJSON＋スクロール | URLの`sort_order=top`（効かなければ並び替えメニューで「トップ」） | `reply_level == 1`かつ起点投稿者宛て |
+| Threads（引用） | 「アクティビティを見る」→「引用」タブの一覧から引用投稿を1件ずつ開く（アクセス間はランダム待機） | — | 引用一覧に載っているもの |
+
+- 並び替えメニュー・「アクティビティを見る」が見つからない等で切り替え（引用一覧）ができなかった場合は警告を出して既定の並びのまま続ける。429・チャレンジ・ログイン画面遷移は従来どおり即中断し、収集済み分を保存して終了コード2/3/4で終わる。
+- 保存先：`data/raw/related_<日付>_<連番>.jsonl`／`ig_related_<日付>_<連番>.jsonl`／`th_related_<日付>_<連番>.jsonl`（実行ごとに新規）。`source_query`は`related:<起点ID>:reply|quote|author`、`ig-related:<shortcode>:comment`、`th-related:<code>:reply|quote`。
+- 上位Markdown：`config.yaml`の`output.digest_dir`配下に`top_x_<起点ID>_<日付>.md`／`top_ig_<shortcode>_<日付>.md`／`top_th_<code>_<日付>.md`（同日の再実行は上書き）。各行は順位・いいね数・投稿者・日時(JST)・本文先頭100字・URL（全文転載はしない）。
+- 返信への返信（Instagramの子コメント・Threadsの孫返信）を展開する追加リクエストはしない。Xの会話スレッドに混ざる入れ子の返信はJSONLには残るがランキングからは除く。
 
 ### trends.py（トレンド把握）
 
@@ -436,13 +474,15 @@ TikTokの特定アカウントの投稿を、Instagram・Threads収集と同じ�
 
 ## 出力ファイルについて
 
-**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`/`ig_user_posts.py`/`th_user_posts.py`/`tt_user_posts.py`）は以下の共通スキーマ。
+**生データ（`data/raw/*.jsonl`）**：1行1レコードのJSONL。ポスト（`search.py`/`user_tweets.py`/`bookmarks.py`/`related.py`/`ig_related.py`/`th_related.py`/`ig_user_posts.py`/`th_user_posts.py`/`tt_user_posts.py`）は以下の共通スキーマ。
 
 ```
 id, url, author_handle, author_name, created_at, text, article_title, article_text, lang,
 like_count, repost_count, reply_count, quote_count,
-media(type/url配列), is_repost, quoted_id, source_query, collected_at
+media(type/url配列), is_repost, quoted_id, in_reply_to_id, source_query, collected_at
 ```
+
+`in_reply_to_id`は返信先の投稿ID（Xは全収集モジュールで`in_reply_to_status_id_str`を格納。Instagramのコメント・Threadsの直接リプライは`ig_related.py`／`th_related.py`が起点投稿のIDを補う。返信でない・親が特定できない場合は`null`）。この項目が無い既存のJSONLもそのまま読める。
 
 トレンド（`trends.py`）は別スキーマ。
 
@@ -484,6 +524,7 @@ location, url, created_at, is_blue_verified, verified_type, protected, category,
 - **Instagram内部API構造変更・取得範囲**：`ig_user_posts.py`も非公開の内部APIに依存するため、構造変更で取得0件になりうる（投稿らしいノードを再帰探索し、欠けた項目は警告スキップする設計）。ピン留めされた古い投稿は差分判定で新規扱いにならない。キーワード・ハッシュタグ検索は未対応。
 - **Threads内部API構造変更・取得範囲**：`th_user_posts.py`も非公開の内部API・ページ埋め込みJSONに依存するため、構造変更で取得0件になりうる。リポストは元投稿のIDで記録されるため、古い投稿のリポストは差分判定で新規扱いにならない。キーワード検索・返信タブは未対応。
 - **TikTok内部API構造変更・CAPTCHA**：`tt_user_posts.py`／`tt_profiles.py`も非公開の内部API（`/api/post/item_list/`・`/api/user/detail/`）・ページ埋め込みJSONに依存し、構造変更で取得0件になりうる。CAPTCHAが出やすく、出た時点で収集を中断する（突破しない）。ピン留めされた古い投稿は差分判定で新規扱いにならない。再生数は保存しない。
+- **リプライ・引用・コメントの取得範囲**：`related.py`／`ig_related.py`／`th_related.py`で集まる件数は、各SNSが表示する返信数・コメント数より少ないことがある（非表示・制限された返信等。理由は未確認）。Xの並び替えメニュー・Threadsの「アクティビティを見る」は文言で特定しているため、英語UIや画面変更で見つからない場合がある（その場合は既定の並びのまま収集する）。Xの検索（引用）は1回のスクロール量では次ページが読み込まれず、話題・最新それぞれ20件前後で止まることがある。
 - **ブックマーク差分取得の抜け漏れ**：`bookmarks.py`の差分判定は投稿IDの大小比較で行っている。ブックマーク一覧はブックマークした順に並ぶため、IDの小さい（＝古い）投稿を後からブックマークした場合、前回取得済み最新IDより小さいと判定されて新規として拾われず、取得漏れが発生しうる。
 
 ## 運用上の注意
