@@ -99,6 +99,7 @@ REPLY_SORT_LIKES_TEXTS = ("いいね", "Likes")
 # 並び替えボタンの描画待ち(1秒×回数)と、「いいね」選択後の取り直し待ち
 REPLY_SORT_WAIT_ROUNDS = 10
 REPLY_SORT_SETTLE_MS = 4000
+VIEWPORT = {"width": 1280, "height": 1000}
 
 FIND_REPLY_SORT_BUTTON_JS = """
 (texts) => {
@@ -464,7 +465,8 @@ def run(args: argparse.Namespace) -> int:
                 executable_path=get_browser_executable_path(config),
             )
             try:
-                context = new_context(browser, config)
+                # 人気順は並び替えボタンを実機調査と同じ画面サイズで探す(recentは従来どおり既定サイズ)
+                context = new_context(browser, config, **({"viewport": VIEWPORT} if popular else {}))
                 require_login(context)
 
                 start_post: Post | None = None

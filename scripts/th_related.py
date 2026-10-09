@@ -83,6 +83,8 @@ RELATION_QUOTE = "quote"
 EMBEDDED_WAIT_MS = 3000
 # 画面操作(メニュー・ダイアログ)後の描画待ち
 UI_WAIT_MS = 3000
+# 実機調査(並び替えメニュー・アクティビティのダイアログ)と同じ画面サイズ
+VIEWPORT = {"width": 1280, "height": 1000}
 
 # 返信の並び替えボタン(テキストは現在の並び)と、人気順の項目。英語UIの文言は未確認の想定値
 REPLY_SORT_BUTTON_TEXTS = ("トップ", "最近", "Top", "Recent")
@@ -312,7 +314,10 @@ def collect_replies_and_quote_refs(
             page, capture, parse, max_items=max_items, wait_seconds_range=wait_range
         )
 
-        if open_quote_list(page):
+        quote_list_opened = open_quote_list(page)
+        # 入口が無い・開けなかった場合でも、操作中のログイン画面/チャレンジ遷移は見逃さない
+        capture.raise_if_blocked(page)
+        if quote_list_opened:
             def parse_refs(payload: dict, endpoint: str) -> list:
                 found = parse_feedback_quote_items(payload, endpoint)
                 ref_buffer.extend(found)
@@ -351,8 +356,13 @@ def fetch_quote_posts(
     try:
         for index, ref in enumerate(refs, start=1):
             page.wait_for_timeout(random.uniform(*wait_range) * 1000)
-            page.goto(ref.url, wait_until="domcontentloaded")
-            page.wait_for_timeout(EMBEDDED_WAIT_MS)
+            try:
+                page.goto(ref.url, wait_until="domcontentloaded")
+                page.wait_for_timeout(EMBEDDED_WAIT_MS)
+            except PlaywrightError as exc:
+                capture.raise_if_blocked(page)
+                logger.warning("引用投稿を開けなかったためスキップします(%d/%d): %s", index, len(refs), exc)
+                continue
             capture.raise_if_blocked(page)
             capture.clear()
             post = find_threads_post(
@@ -402,7 +412,7 @@ def run(args: argparse.Namespace) -> int:
                 executable_path=get_browser_executable_path(config),
             )
             try:
-                context = new_threads_context(browser, config)
+                context = new_threads_context(browser, config, viewport=VIEWPORT)
                 require_threads_login(context)
                 origin, origin_pk, origin_handle, replies, refs, blocked = collect_replies_and_quote_refs(
                     context, post_url, username, code, max_items, wait_range

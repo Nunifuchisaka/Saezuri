@@ -71,6 +71,8 @@ EXIT_CHALLENGE = 4
 EMBEDDED_WAIT_MS = 3000
 # 投稿ページの埋め込みJSONのうち、投稿本体(shortcode__web_info)とコメント一覧を含むものの目印
 EMBEDDED_JSON_MARKER = "xdt_api__v1__media__"
+# 実機調査(コメント欄の内部スクロール)と同じ画面サイズ
+VIEWPORT = {"width": 1280, "height": 1000}
 
 # コメント欄はウィンドウではなく内部のスクロールコンテナで追加読み込みされるため、
 # スクロール量が最大の要素を探して末尾まで送る(見つからなければウィンドウをスクロール)
@@ -197,7 +199,7 @@ def run(args: argparse.Namespace) -> int:
                 executable_path=get_browser_executable_path(config),
             )
             try:
-                context = new_instagram_context(browser, config)
+                context = new_instagram_context(browser, config, viewport=VIEWPORT)
                 require_instagram_login(context)
                 origin, media_pk, comments, blocked = collect_comments(context, code, max_items, wait_range)
             finally:
