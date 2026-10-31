@@ -27,8 +27,7 @@ output:
 session:
   storage_state_path: session/x_storage_state.json  # 手動ログイン結果（storage_state）の保存先
   # 管理人が起動・ログイン済みのChromeにCDPで接続する場合の接続先(X側スクリプトの--cdp省略時の既定)。空ならstorage_state方式
-  # 例: cdp_url: http://127.0.0.1:9222
-  cdp_url:
+  cdp_url: http://127.0.0.1:9222
 
 # 起動するブラウザエンジン(chromium/firefox/webkit/brave)。不正値・省略時はchromiumにフォールバックする。
 # firefox/webkitを使う場合は事前に `playwright install firefox` / `playwright install webkit` が必要。
