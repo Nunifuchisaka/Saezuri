@@ -362,6 +362,19 @@ def _parse_article(result: dict) -> tuple[Optional[str], Optional[str]]:
     return title, text
 
 
+def _parse_note_tweet_text(result: dict) -> Optional[str]:
+    """長文ツイート(Note Tweet)の全文を取り出す。無い・想定外の型ならNone。
+
+    legacy.full_textは280字で切られるため全文は note_tweet 配下にある。
+    TweetWithVisibilityResults形式では tweet 配下にネストするため両方を見る。
+    """
+    for base in (result, _dig(result, "tweet")):
+        text = _dig(base, "note_tweet", "note_tweet_results", "result", "text")
+        if isinstance(text, str) and text.strip():
+            return text
+    return None
+
+
 def _parse_tweet_result(
     result: dict,
     operation: str,
@@ -379,10 +392,11 @@ def _parse_tweet_result(
         logger.warning("%s: id_str/rest_idが見つからないため1件スキップします", operation)
         return None
 
-    text = legacy.get("full_text")
-    if text is None:
+    full_text = legacy.get("full_text")
+    if full_text is None:
         logger.warning("%s: full_textが見つからないため1件スキップします(id=%s)", operation, post_id)
         return None
+    text = _parse_note_tweet_text(result) or full_text
 
     handle, name = _parse_author(result)
     if not handle:

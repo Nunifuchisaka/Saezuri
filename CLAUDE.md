@@ -65,6 +65,7 @@ python scripts/tt_profiles.py                                     # tiktok.watch
   - `scroll_and_collect`：スクロール→`drain()`→ランダム待機（`config.yaml`の`wait_seconds`）を、上限件数到達または新規アイテムなしが規定回数（既定3回）続くまで繰り返す。429検知で`RateLimitedError`、チャレンジ画面遷移で`ChallengeDetectedError`を送出。`scroll_script`引数でスクロールJSを差し替えられる（既定はウィンドウのスクロール。Instagramのコメント欄・Threadsのアクティビティのダイアログのように内部コンテナで追加読み込みするページ用）。
   - `GraphQLCapture.inject()`：レスポンス以外のペイロード（ページ埋め込みJSON・読み出し済みペイロード）を次の`drain()`の先頭に載せる。基底クラスにあるため`InstagramCapture`/`ThreadsCapture`/`TikTokCapture`もそのまま使える。
   - `_parse_tweet_result`は`legacy.in_reply_to_status_id_str`を`Post.in_reply_to_id`に格納する（X側の全収集モジュールのJSONLに入る）。
+  - 本文は`_parse_note_tweet_text`で長文ツイート（Note Tweet）の`note_tweet.note_tweet_results.result.text`（`result`と`result.tweet`の両方を見る）を優先し、無ければ`legacy.full_text`。`full_text`は280字で切られるため（末尾が`https://t.co/…`）。`full_text`欠如時のスキップ判定は従来どおり。テストは`tests/test_capture_note_tweet.py`。
 
 ### `scripts/tweet.py`（単一ツイート取得）
 
