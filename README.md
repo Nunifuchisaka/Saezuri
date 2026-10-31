@@ -10,6 +10,7 @@ X（旧Twitter）のキーワード検索・アカウント追跡・トレンド
 - [セットアップ](#セットアップ)
 - [使い方](#使い方)
   - [login.py（初回ログイン）](#loginpy初回ログイン)
+    - [自分のChromeにCDPで接続してX側を収集する（`--cdp`）](#自分のchromeにcdpで接続してx側を収集する--cdp)
   - [search.py（キーワード／ハッシュタグ検索）](#searchpyキーワードハッシュタグ検索)
   - [user_tweets.py（特定アカウント投稿追跡）](#user_tweetspy特定アカウント投稿追跡)
   - [x_profiles.py（アカウントのフォロワー数等取得）](#x_profilespyアカウントのフォロワー数等取得)
@@ -110,6 +111,28 @@ python scripts/login.py
 
 **注意**：`login.py`と収集スクリプト（`search.py`等）で異なるブラウザエンジンを使うと、`storage_state`を保存したエンジンと読み込むエンジンでフィンガープリントが変わりbot検知リスクが上がるため、同じ`--browser`（またはconfig.yamlの`browser`）を使うこと。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要。
 
+#### 自分のChromeにCDPで接続してX側を収集する（`--cdp`）
+
+Playwrightが起動したブラウザ（`login.py`）は「自動操作中」の目印が付くため、Googleログインが「このブラウザは安全でない可能性があります」と拒否してサブ垢でログインし直せないことがある。その場合は、管理人が自分で起動・ログインしたChromeへCDP（Chrome DevTools Protocol）で接続して、X側の収集スクリプト（`search.py`／`user_tweets.py`／`trends.py`／`bookmarks.py`／`tweet.py`／`related.py`／`x_profiles.py`）を実行できる。**実機未確認**。
+
+1. 専用プロファイルでChromeを起動する（デバッグポート付き）
+   ```
+   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\chrome-saezuri-profile
+   ```
+   最近のChromeは**既定プロファイルではデバッグポートが使えない**ため、`--user-data-dir`で専用プロファイルのフォルダを必ず指定する。TikTokの`--cdp`と同じ9222番のChromeを共用してよい（同じプロファイルでXとTikTokの両方にログインしておけばどちらにも使える）。
+2. そのChromeでXを開き、サブ垢で手動ログインする（ログイン情報は専用プロファイルに残るので次回以降は不要）。
+3. 収集する
+   ```
+   python scripts/tweet.py --url https://x.com/foo/status/1234567890 --cdp http://127.0.0.1:9222
+   python scripts/search.py --query "VRChat" --cdp http://127.0.0.1:9222
+   ```
+
+- `--cdp`省略時は`config.yaml`の`session.cdp_url`、それも空なら従来のstorage_state方式（`login.py`）で動く。
+- 接続先Chromeの既存コンテキストに新しいタブを開いて使い、終了時にそのタブだけ閉じる。Chrome本体は閉じず、storage_stateも読み書きしない。`--browser`／`--headed`はCDP接続時は使われない。
+- ログイン検証は、そのChromeのCookieに有効期限内の`auth_token`（x.com／twitter.com）があるかを確かめたうえで、従来どおり`x.com/home`がログイン画面へ飛ばないかで行う。どちらかに引っかかれば終了コード2。接続できない（Chrome未起動・ポート違い）場合は終了コード1。
+- `related.py`の人気順（`--sort popular`）は、既存コンテキストに画面サイズを指定できないため、開くタブごとに1280x1000へ合わせる。
+- 自動ログイン・チャレンジ突破・自動リトライは行わない。429・チャレンジ検知時の扱いと終了コードはstorage_state方式と同じ。
+
 ### search.py（キーワード／ハッシュタグ検索）
 
 `x.com/search?q=<クエリ>&f=live|top`を開き、`SearchTimeline`オペレーションのレスポンスを傍受する。
@@ -131,6 +154,7 @@ python scripts/search.py --query "#VRChat" --since-days 7
 | `--config` | 設定ファイルのパス（既定: `config.yaml`） |
 | `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+| `--cdp` | 起動・ログイン済みのChromeにCDPで接続する（例: `http://127.0.0.1:9222`。省略時は`config.yaml`の`session.cdp_url`、それも無ければstorage_state方式）。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照 |
 
 結果は実行ごとに`data/raw/search_<日付>_<連番3桁>.jsonl`という新規ファイルに保存する（同日に複数回実行してもキーワードごとにファイルが分離され、連番はその日の実行回数でカウントする）。既読IDは`state/seen_ids.json`でグローバル管理する（同一IDは再保存しない）。
 
@@ -180,6 +204,7 @@ python scripts/user_tweets.py --include-replies
 | `--config` | 設定ファイルのパス（既定: `config.yaml`） |
 | `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+| `--cdp` | 起動・ログイン済みのChromeにCDPで接続する（例: `http://127.0.0.1:9222`。省略時は`config.yaml`の`session.cdp_url`、それも無ければstorage_state方式）。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照 |
 
 結果は`data/raw/user_tweets_<日付>.jsonl`に追記する。ハンドルごとに`state/<handle>_last_id.json`へ前回取得済み最新IDを保存し、それより新しいIDの投稿のみを差分保存する。レートリミット・チャレンジ検知時はその時点までの収集分を保存し、残りのアカウントは処理しない。
 
@@ -222,6 +247,7 @@ python scripts/tweet.py --id 1234567890
 | `--config` | 設定ファイルのパス（既定: `config.yaml`） |
 | `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+| `--cdp` | 起動・ログイン済みのChromeにCDPで接続する（例: `http://127.0.0.1:9222`。省略時は`config.yaml`の`session.cdp_url`、それも無ければstorage_state方式）。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照 |
 
 本文・投稿者・エンゲージメント数を標準出力に表示し、`data/raw/tweet_<日付>_<連番3桁>.jsonl`に1件保存する。対象ツイートが見つからなかった場合（削除・非公開・鍵アカウント等）は終了コード`1`でエラーメッセージを表示する。
 
@@ -249,6 +275,7 @@ python scripts/th_related.py --url https://www.threads.com/@foo/post/XXXXXXXXXXX
 | `--sort popular\|recent` | `related.py`のみ。既定`popular`。`recent`は従来の表示順で収集し、Markdownは出さない |
 | `--replies` / `--quotes` / `--author` / `--unseen-only` | `related.py`のみ（従来どおり。`--author`の同一投稿者はランキング対象外） |
 | `--config` / `--browser` / `--headed` | 他スクリプトと同じ |
+| `--cdp` | `related.py`のみ。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照（人気順の画面サイズ1280x1000は開くタブごとに合わせる） |
 
 人気順への切り替えと直接返信の判定：
 
@@ -281,6 +308,7 @@ python scripts/trends.py --no-filter   # 全件
 | `--config` | 設定ファイルのパス（既定: `config.yaml`） |
 | `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+| `--cdp` | 起動・ログイン済みのChromeにCDPで接続する（例: `http://127.0.0.1:9222`。省略時は`config.yaml`の`session.cdp_url`、それも無ければstorage_state方式）。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照 |
 
 結果は`data/raw/trends_<日付>.jsonl`に追記する。`interest_keywords`が空の場合は絞り込みをせず全件保存する（警告メッセージを表示）。
 
@@ -298,6 +326,7 @@ python scripts/bookmarks.py
 | `--config` | 設定ファイルのパス（既定: `config.yaml`） |
 | `--browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `config.yaml`の`browser`） |
 | `--headed` | ブラウザを可視状態で起動する（デバッグ用） |
+| `--cdp` | 起動・ログイン済みのChromeにCDPで接続する（例: `http://127.0.0.1:9222`。省略時は`config.yaml`の`session.cdp_url`、それも無ければstorage_state方式）。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照 |
 
 結果は`data/raw/bookmarks_<日付>.jsonl`に追記する。`state/bookmarks_last_id.json`へ前回取得済み最新IDを保存し、差分取得する（差分判定の制約は[既知の制約](#既知の制約)を参照）。
 
@@ -460,6 +489,7 @@ TikTokの特定アカウントの投稿を、Instagram・Threads収集と同じ�
 | `output.digest_dir` | `digest.py`が生成するMarkdownダイジェストの出力先ディレクトリ（既定: `digest`） |
 | `output.media_dir` | `media.py`がダウンロードした画像の出力先ディレクトリ（既定: `data/media`。この下に入力JSONLごとのサブディレクトリを作る） |
 | `session.storage_state_path` | 手動ログイン結果（`storage_state`）の保存先（既定: `session/x_storage_state.json`） |
+| `session.cdp_url` | X側スクリプトで管理人のChromeにCDPで接続する際の接続先（例: `http://127.0.0.1:9222`）。`--cdp`省略時の既定で、空ならstorage_state方式 |
 | `browser` | 起動するブラウザエンジン（`chromium`／`firefox`／`webkit`／`brave`。既定: `chromium`。不正値は`chromium`にフォールバックし警告を表示） |
 | `instagram.watch_accounts` | `ig_user_posts.py`が追跡対象にするInstagramユーザー名のリスト（`@`は付けない） |
 | `instagram.storage_state_path` | `ig_login.py`の手動ログイン結果の保存先（既定: `session/instagram_storage_state.json`） |

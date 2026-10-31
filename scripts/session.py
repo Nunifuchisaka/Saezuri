@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 import yaml
 from playwright.sync_api import Browser, BrowserContext
@@ -38,6 +40,15 @@ LOGIN_URL_KEYWORDS = ("/login", "/i/flow/login")
 CHALLENGE_URL_KEYWORDS = ("challenge", "account/access")
 
 RELOGIN_MESSAGE = "セッションが失効しています。login.pyを再実行して手動ログインし直してください。"
+
+CDP_RELOGIN_MESSAGE = (
+    "接続先ChromeがXにログインしていません。"
+    "そのChromeでX(サブ垢)に手動ログインしてから再実行してください。"
+)
+
+# XのログインセッションCookie(ログイン済みブラウザにのみ付与される)
+X_SESSION_COOKIE_NAME = "auth_token"
+X_SESSION_COOKIE_DOMAINS = ("x.com", "twitter.com")
 
 
 class SessionExpiredError(RuntimeError):
@@ -83,6 +94,70 @@ def connect_cdp(playwright, cdp_url: str):
             f"接続先Chromeに利用できるブラウザコンテキストがありません: {cdp_url}"
         )
     return browser, browser.contexts[0]
+
+
+def get_x_cdp_url(cli_value: Optional[str], config: dict) -> Optional[str]:
+    """--cdp指定 > config.yamlのsession.cdp_url > None(従来のstorage_state方式)。"""
+    section = config.get("session")
+    return resolve_cdp_url(cli_value, section if isinstance(section, dict) else None)
+
+
+def _is_x_cookie_domain(domain: str) -> bool:
+    domain = domain.lstrip(".")
+    return any(domain == d or domain.endswith(f".{d}") for d in X_SESSION_COOKIE_DOMAINS)
+
+
+def has_x_session_cookie(cookies: Iterable[dict], now: Optional[float] = None) -> bool:
+    """Cookie一覧にXのログインセッションCookie(auth_token)が有効期限内で含まれるか。"""
+    now = time.time() if now is None else now
+    for cookie in cookies:
+        if (
+            cookie.get("name") == X_SESSION_COOKIE_NAME
+            and cookie.get("value")
+            and _is_x_cookie_domain(cookie.get("domain") or "")
+        ):
+            expires = cookie.get("expires")
+            # expires=-1(または未設定)はセッションCookie扱いで有効とみなす
+            if isinstance(expires, (int, float)) and 0 < expires < now:
+                continue
+            return True
+    return False
+
+
+@contextmanager
+def open_x_context(
+    playwright, config: dict, cdp_url: Optional[str], browser_name: str, headed: bool,
+    **context_kwargs,
+):
+    """X収集用のBrowserContextを開いて渡し、ログイン検証まで済ませる。
+
+    cdp_urlあり: 起動済みChromeに接続し既存context(contexts[0])を使う。
+      Chrome本体・contextは閉じず、storage_stateも読み書きしない(タブを閉じるのは呼び出し側)。
+      context_kwargs(viewport等)は既存contextに適用できないため無視する。
+    cdp_urlなし: 従来どおりstorage_stateでブラウザを起動し、終了時に閉じる。
+    """
+    if cdp_url:
+        if context_kwargs:
+            logger.info("CDP接続では既存のブラウザコンテキストを使うため、次の指定は無視されます: %s",
+                        ", ".join(sorted(context_kwargs)))
+        _, context = connect_cdp(playwright, cdp_url)
+        if not has_x_session_cookie(context.cookies()):
+            raise SessionExpiredError(CDP_RELOGIN_MESSAGE)
+        # 文言をCDP用にするためrequire_loginではなくverify_loginを直接使う(判定は同じ)
+        if not verify_login(context):
+            raise SessionExpiredError(CDP_RELOGIN_MESSAGE)
+        yield context
+        return
+    browser = launch_browser(
+        playwright, browser_name, headless=not headed,
+        executable_path=get_browser_executable_path(config),
+    )
+    try:
+        context = new_context(browser, config, **context_kwargs)
+        require_login(context)
+        yield context
+    finally:
+        browser.close()
 
 
 def get_storage_state_path(config: dict) -> Path:

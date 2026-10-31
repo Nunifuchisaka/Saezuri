@@ -39,13 +39,12 @@ from capture import (
 )
 from session import (
     SUPPORTED_BROWSERS,
+    CdpConnectionError,
     SessionExpiredError,
-    get_browser_executable_path,
     get_browser_name,
-    launch_browser,
+    get_x_cdp_url,
     load_config,
-    new_context,
-    require_login,
+    open_x_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,6 +85,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config.yaml", help="設定ファイルのパス(既定: config.yaml)")
     parser.add_argument("--browser", choices=SUPPORTED_BROWSERS, default=None,
                         help="起動するブラウザエンジン(省略時はconfig.yamlのbrowser)")
+    parser.add_argument("--cdp", default=None, metavar="URL",
+                        help="管理人が起動・ログイン済みのChromeにCDPで接続する(例: http://127.0.0.1:9222。"
+                             "省略時はconfig.yamlのsession.cdp_url、それも無ければstorage_state方式)")
     parser.add_argument("--headed", action="store_true", help="ブラウザを可視状態で起動する(デバッグ用)")
     return parser
 
@@ -181,6 +183,7 @@ def run(args: argparse.Namespace) -> int:
     max_items = args.max if args.max is not None else get_max_items(config)
     wait_range = get_wait_seconds_range(config)
     browser_name = args.browser or get_browser_name(config)
+    cdp_url = get_x_cdp_url(args.cdp, config)
 
     since, until = resolve_date_range(args.since, args.until, args.since_days)
     if args.split_days is not None:
@@ -225,41 +228,39 @@ def run(args: argparse.Namespace) -> int:
     error_message = None
     try:
         with sync_playwright() as playwright:
-            browser = launch_browser(
-                playwright, browser_name, headless=not args.headed,
-                executable_path=get_browser_executable_path(config),
-            )
-            capture = None
-            page = None
-            try:
-                context = new_context(browser, config)
-                require_login(context)
-                page = context.new_page()
-                capture = GraphQLCapture(operations=("SearchTimeline",))
-                capture.attach(page)
-                for index, current_query in enumerate(targets):
-                    if index > 0:
-                        page.wait_for_timeout(random.uniform(*wait_range) * 1000)
-                    capture.clear()
-                    page.goto(build_search_url(current_query, args.mode), wait_until="domcontentloaded")
-                    window_posts = scroll_and_collect(
-                        page,
-                        capture,
-                        parse,
-                        max_items=max_items,
-                        wait_seconds_range=wait_range,
-                    )
-                    posts.extend(window_posts)
-                    if len(targets) > 1:
-                        logger.info("窓 %d/%d: %d件取得 (%s)", index + 1, len(targets), len(window_posts), current_query)
-            finally:
-                if capture is not None and page is not None:
-                    try:
-                        capture.detach(page)
-                    except Exception as exc:
-                        logger.warning("GraphQLCaptureのdetachに失敗しました: %s", exc)
-                browser.close()
-    except FileNotFoundError as exc:
+            with open_x_context(
+                playwright, config, cdp_url, browser_name, args.headed
+            ) as context:
+                capture = None
+                page = None
+                try:
+                    page = context.new_page()
+                    capture = GraphQLCapture(operations=("SearchTimeline",))
+                    capture.attach(page)
+                    for index, current_query in enumerate(targets):
+                        if index > 0:
+                            page.wait_for_timeout(random.uniform(*wait_range) * 1000)
+                        capture.clear()
+                        page.goto(build_search_url(current_query, args.mode), wait_until="domcontentloaded")
+                        window_posts = scroll_and_collect(
+                            page,
+                            capture,
+                            parse,
+                            max_items=max_items,
+                            wait_seconds_range=wait_range,
+                        )
+                        posts.extend(window_posts)
+                        if len(targets) > 1:
+                            logger.info("窓 %d/%d: %d件取得 (%s)", index + 1, len(targets), len(window_posts), current_query)
+                finally:
+                    if capture is not None and page is not None:
+                        try:
+                            capture.detach(page)
+                        except Exception as exc:
+                            logger.warning("GraphQLCaptureのdetachに失敗しました: %s", exc)
+                    if page is not None:
+                        page.close()
+    except (FileNotFoundError, CdpConnectionError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except SessionExpiredError as exc:

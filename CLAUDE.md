@@ -55,7 +55,7 @@ python scripts/tt_profiles.py                                     # tiktok.watch
 
 ### 共通基盤（`scripts/`直下、収集モジュールからimportされる）
 
-- **`session.py`**：`config.yaml`の読み込み、ブラウザ起動（chromium/firefox/webkit/brave対応。braveはchromiumエンジン+`executable_path`指定で起動）、`storage_state`（手動ログイン結果）を使った`BrowserContext`生成、`verify_login`/`require_login`によるログイン状態検証（失効時`SessionExpiredError`）。
+- **`session.py`**：`config.yaml`の読み込み、ブラウザ起動（chromium/firefox/webkit/brave対応。braveはchromiumエンジン+`executable_path`指定で起動）、`storage_state`（手動ログイン結果）を使った`BrowserContext`生成、`verify_login`/`require_login`によるログイン状態検証（失効時`SessionExpiredError`）。X側の入口は`open_x_context`（contextマネージャ。`--cdp`ありなら`connect_cdp`で管理人のChromeの既存contextを使い、`has_x_session_cookie`（`x.com`/`twitter.com`の`auth_token`が有効期限内か）→`verify_login`で検証、Chrome本体・contextは閉じずstorage_stateも読み書きしない。`context_kwargs`（viewport等）は既存contextに適用できないので無視してinfoログを出す。`--cdp`なしなら従来どおり`launch_browser`→`new_context`→`require_login`で、終了時に`browser.close()`）。接続先の決定は`get_x_cdp_url`（`--cdp` > `session.cdp_url` > None）。CDP時の失効メッセージは`login.py`ではなく「接続先ChromeでXに手動ログイン」を案内するため、`require_login`ではなく`verify_login`を直接使っている。
 - **`storage.py`**：JSONLの追記・読み込み、`state/seen_ids.json`（グローバル既読ID）、`state/<account>_last_id.json`（アカウント別前回取得ID）の読み書きと差分判定（`filter_unseen`）。
 - **`schema.py`**：`Post`／`TrendEntry`のdataclass定義。`to_dict()`/`from_dict()`でJSONLとの相互変換を行う（項目順・欠損キーの扱いはここに集約）。`Post.in_reply_to_id`（返信先の投稿ID、任意項目。`quoted_id`の直後に出力。キーが無い既存JSONLは`None`で読む）。
 - **`capture.py`**：収集処理の中核。
@@ -86,8 +86,8 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 ### 収集エントリポイント（`scripts/search.py` / `user_tweets.py` / `trends.py` / `bookmarks.py`）
 
 各スクリプトは同一パターンで構成される：
-1. `load_config` → `launch_browser`（`--headed`未指定ならheadless）→ `new_context`（`storage_state`ロード。未ログインなら`FileNotFoundError`）
-2. `require_login`でセッション検証（失効なら`SessionExpiredError`）
+1. `load_config` → `get_x_cdp_url`で`--cdp`を解決 → `open_x_context`（storage_state方式なら`launch_browser`（`--headed`未指定ならheadless）→ `new_context`（`storage_state`ロード。未ログインなら`FileNotFoundError`）。CDP方式なら既存Chromeに接続、接続失敗は`CdpConnectionError`で終了コード1）
+2. `open_x_context`の中でセッション検証（失効なら`SessionExpiredError`）。`tweet.py`/`related.py`/`x_profiles.py`も同じ入口を使う。`context.new_page()`で開いたページは必ず`try/finally`で`page.close()`する（CDP接続では`browser.close()`でタブが片付かず、管理人のChromeにタブが溜まるため）
 3. `GraphQLCapture`を対象オペレーションで生成・`attach`
 4. `scroll_and_collect`で収集ループを回す（parse関数内で外側の`buffer`にも溜めておき、例外中断時も収集済み分を保存できるようにする、というパターンを踏襲すること）
 5. 収集結果を`storage`経由でJSONL保存・既読/差分状態を更新
@@ -127,7 +127,7 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 - **`tt_login.py`** / **`tt_user_posts.py`**：`th_login.py`/`th_user_posts.py`と同構成（埋め込みJSON注入は無し）。`filter_by_author`は`ig_user_posts.py`から流用。`data/raw/tiktok_posts_<日付>.jsonl`に追記し、`state/tiktok_<ユーザー名>_last_id.json`で差分管理。
 - **`tt_profiles.py`**：`th_profiles.py`相当。埋め込みJSON（`userInfo`）または`user_detail`APIからフォロワー数・フォロー数・いいね合計（`heartCount`）・動画数を取り`data/raw/tt_profiles_<日付>.jsonl`に追記（差分管理なし）。概数フォールバック（画面テキスト解析）は実装していない。
 
-**CDP接続（`--cdp`）**：`tt_user_posts.py`/`tt_profiles.py`は`--cdp http://127.0.0.1:9222`（省略時は`config.yaml`の`tiktok.cdp_url`、空ならstorage_state方式）で、管理人が自分で起動・ログイン済みのChromeに`connect_over_cdp`で接続できる(tt_login.pyの試行上限対策)。共通ヘルパーは`session.py`の`resolve_cdp_url`/`connect_cdp`/`CdpConnectionError`、TikTok側の入口は`tiktok.py`の`open_tiktok_context`(ログイン検証込みのcontextマネージャ)。既存の`contexts[0]`に新規タブを開いて使い、閉じるのはタブだけ(Chrome本体は閉じない・storage_stateは保存しない)。ログイン検証は`sessionid` Cookieの有効期限判定(無ければ終了コード2)、接続失敗は終了コード1。起動例: `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>`で起動→TikTokにログイン→`python scripts/tt_profiles.py --cdp http://127.0.0.1:9222`。**最近のChromeは既定プロファイルではデバッグポートが使えないため、`--user-data-dir`での専用プロファイル指定が必須。** CAPTCHA検知で即中断(終了コード4)・自動ログイン/突破/リトライなしの方針は不変。単体テストは`tests/test_cdp.py`。実機未確認。
+**CDP接続（`--cdp`）**：X側の`search.py`/`user_tweets.py`/`trends.py`/`bookmarks.py`/`tweet.py`/`related.py`/`x_profiles.py`も`--cdp`（省略時は`config.yaml`の`session.cdp_url`、空ならstorage_state方式）で同じように接続できる（`login.py`がPlaywright起動のBraveで「自動操作中」扱いになりGoogleログインを拒否される対策）。入口は`session.py`の`open_x_context`、ログイン検証は`auth_token` Cookie＋`x.com/home`のリダイレクト判定（どちらかNGで終了コード2）。TikTokと同じ9222番のChrome（同じ専用プロファイル）を共用できる。`related.py`の人気順は既存contextにviewportを渡せないため、CDP時のみ`collect_thread`/`collect_timeline_relation`の`viewport`引数で開いたタブに`page.set_viewport_size(VIEWPORT)`をかける（storage_state方式は従来どおりcontextのviewport）。起動例: `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>`→Xにサブ垢で手動ログイン→`python scripts/tweet.py --url ... --cdp http://127.0.0.1:9222`。X側も実機未確認。TikTok側：`tt_user_posts.py`/`tt_profiles.py`は`--cdp http://127.0.0.1:9222`（省略時は`config.yaml`の`tiktok.cdp_url`、空ならstorage_state方式）で、管理人が自分で起動・ログイン済みのChromeに`connect_over_cdp`で接続できる(tt_login.pyの試行上限対策)。共通ヘルパーは`session.py`の`resolve_cdp_url`/`connect_cdp`/`CdpConnectionError`、TikTok側の入口は`tiktok.py`の`open_tiktok_context`(ログイン検証込みのcontextマネージャ)。既存の`contexts[0]`に新規タブを開いて使い、閉じるのはタブだけ(Chrome本体は閉じない・storage_stateは保存しない)。ログイン検証は`sessionid` Cookieの有効期限判定(無ければ終了コード2)、接続失敗は終了コード1。起動例: `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>`で起動→TikTokにログイン→`python scripts/tt_profiles.py --cdp http://127.0.0.1:9222`。**最近のChromeは既定プロファイルではデバッグポートが使えないため、`--user-data-dir`での専用プロファイル指定が必須。** CAPTCHA検知で即中断(終了コード4)・自動ログイン/突破/リトライなしの方針は不変。単体テストは`tests/test_cdp.py`。実機未確認。
 
 ### 起点投稿のリプライ・引用・コメント上位抽出（`scripts/related.py` / `ig_related.py` / `th_related.py` / `ranking.py`）
 

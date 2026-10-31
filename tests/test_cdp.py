@@ -1,7 +1,14 @@
 """CDP接続まわり(接続先URLの解決・ログイン判定・接続失敗)の単体テスト。実ブラウザは使わない。"""
 import pytest
 
-from session import CdpConnectionError, connect_cdp, resolve_cdp_url
+from session import (
+    CdpConnectionError,
+    connect_cdp,
+    get_x_cdp_url,
+    has_x_session_cookie,
+    open_x_context,
+    resolve_cdp_url,
+)
 from tiktok import get_tiktok_cdp_url, has_tiktok_session_cookie, open_tiktok_context
 from session import SessionExpiredError
 
@@ -114,4 +121,44 @@ def test_open_tiktok_context_cdp_does_not_close_chrome():
     pw = _FakePlaywright(_FakeChromium(browser))
     with open_tiktok_context(pw, {}, "http://127.0.0.1:9222", "chromium", False) as got:
         assert got is ctx
+    assert not browser.closed
+
+
+def test_get_x_cdp_url():
+    assert get_x_cdp_url(None, {}) is None
+    assert get_x_cdp_url(None, {"session": {"storage_state_path": "s.json"}}) is None
+    assert get_x_cdp_url(None, {"session": {"cdp_url": None}}) is None
+    assert get_x_cdp_url(None, {"session": {"cdp_url": "http://a:9"}}) == "http://a:9"
+    assert get_x_cdp_url("http://b:1", {"session": {"cdp_url": "http://a:9"}}) == "http://b:1"
+
+
+def _x_cookie(**kw):
+    base = {"name": "auth_token", "value": "dummy", "domain": ".x.com", "expires": NOW + 1000}
+    base.update(kw)
+    return base
+
+
+def test_x_cookie_valid():
+    assert has_x_session_cookie([_x_cookie()], now=NOW)
+    assert has_x_session_cookie([_x_cookie(domain="x.com")], now=NOW)
+    assert has_x_session_cookie([_x_cookie(domain=".twitter.com")], now=NOW)
+    assert has_x_session_cookie([_x_cookie(expires=-1)], now=NOW)
+    assert has_x_session_cookie([{k: v for k, v in _x_cookie().items() if k != "expires"}], now=NOW)
+
+
+def test_x_cookie_invalid():
+    assert not has_x_session_cookie([_x_cookie(expires=NOW - 1)], now=NOW)
+    assert not has_x_session_cookie([_x_cookie(domain=".example.com")], now=NOW)
+    assert not has_x_session_cookie([_x_cookie(domain=".box.com")], now=NOW)
+    assert not has_x_session_cookie([_x_cookie(value="")], now=NOW)
+    assert not has_x_session_cookie([_x_cookie(name="ct0")], now=NOW)
+    assert not has_x_session_cookie([], now=NOW)
+
+
+def test_open_x_context_cdp_requires_session_cookie():
+    browser = _FakeBrowser([_FakeContext([])])
+    pw = _FakePlaywright(_FakeChromium(browser))
+    with pytest.raises(SessionExpiredError):
+        with open_x_context(pw, {}, "http://127.0.0.1:9222", "chromium", False):
+            pass
     assert not browser.closed

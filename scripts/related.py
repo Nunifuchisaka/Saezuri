@@ -59,13 +59,12 @@ from schema import Post
 from search import build_search_url
 from session import (
     SUPPORTED_BROWSERS,
+    CdpConnectionError,
     SessionExpiredError,
-    get_browser_executable_path,
     get_browser_name,
-    launch_browser,
+    get_x_cdp_url,
     load_config,
-    new_context,
-    require_login,
+    open_x_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,6 +153,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config.yaml", help="設定ファイルのパス(既定: config.yaml)")
     parser.add_argument("--browser", choices=SUPPORTED_BROWSERS, default=None,
                         help="起動するブラウザエンジン(省略時はconfig.yamlのbrowser)")
+    parser.add_argument("--cdp", default=None, metavar="URL",
+                        help="管理人が起動・ログイン済みのChromeにCDPで接続する(例: http://127.0.0.1:9222。"
+                             "省略時はconfig.yamlのsession.cdp_url、それも無ければstorage_state方式)")
     parser.add_argument("--headed", action="store_true", help="ブラウザを可視状態で起動する(デバッグ用)")
     return parser
 
@@ -344,12 +346,14 @@ def collect_thread(
     wait_range: tuple[float, float],
     collected: dict[str, Post],
     sort_by_likes: bool = False,
+    viewport: dict | None = None,
 ) -> tuple[Post | None, Exception | None]:
     """①TweetDetailを傍受して会話スレッドを収集し、起点Postを特定する。
 
     save_repliesがTrueなら収集分(起点Post自身=focalを除く)をcollectedへマージする
     (reply種別)。Falseの場合は起点Postのハンドル取得のみ行いマージしない。
     sort_by_likesがTrueなら収集前に並び替えメニューで「いいね」を選ぶ(失敗しても続行)。
+    viewport指定時は開いたページの画面サイズをそれに合わせる(CDP接続でcontextに指定できない場合用)。
     戻り値は(起点Post または None, ブロック検知例外 または None)。
     """
     collected_at = now_iso()
@@ -366,6 +370,8 @@ def collect_thread(
     capture = GraphQLCapture(operations=("TweetDetail",))
     capture.attach(page)
     try:
+        if viewport:
+            page.set_viewport_size(viewport)
         page.goto(goto_url, wait_until="domcontentloaded")
         if sort_by_likes:
             switch_reply_sort_to_likes(page, capture)
@@ -397,6 +403,7 @@ def collect_timeline_relation(
     wait_range: tuple[float, float],
     collected: dict[str, Post],
     scroll_script: str = SCROLL_SCRIPT,
+    viewport: dict | None = None,
 ) -> Exception | None:
     """②③共通: SearchTimeline/UserTweetsを傍受し収集分をcollectedへマージする。
 
@@ -417,6 +424,8 @@ def collect_timeline_relation(
     capture = GraphQLCapture(operations=(operation,))
     capture.attach(page)
     try:
+        if viewport:
+            page.set_viewport_size(viewport)
         page.goto(goto_url, wait_until="domcontentloaded")
         posts = scroll_and_collect(
             page, capture, parse, max_items=max_items, wait_seconds_range=wait_range,
@@ -455,6 +464,7 @@ def run(args: argparse.Namespace) -> int:
     max_items = args.max if args.max is not None else get_max_items(config)
     wait_range = get_wait_seconds_range(config)
     browser_name = args.browser or get_browser_name(config)
+    cdp_url = get_x_cdp_url(args.cdp, config)
 
     # id→Post(初出優先)。中断時もここに溜まった分を保存する。
     collected: dict[str, Post] = {}
@@ -470,15 +480,13 @@ def run(args: argparse.Namespace) -> int:
 
     try:
         with sync_playwright() as playwright:
-            browser = launch_browser(
-                playwright, browser_name, headless=not args.headed,
-                executable_path=get_browser_executable_path(config),
-            )
-            try:
-                # 人気順は並び替えボタンを実機調査と同じ画面サイズで探す(recentは従来どおり既定サイズ)
-                context = new_context(browser, config, **({"viewport": VIEWPORT} if popular else {}))
-                require_login(context)
-
+            # 人気順は並び替えボタンを実機調査と同じ画面サイズで探す(recentは従来どおり既定サイズ)。
+            # CDP接続では既存contextに指定できないため、開くページごとに合わせる
+            page_viewport = VIEWPORT if popular and cdp_url else None
+            with open_x_context(
+                playwright, config, cdp_url, browser_name, args.headed,
+                **({"viewport": VIEWPORT} if popular and not cdp_url else {}),
+            ) as context:
                 start_post: Post | None = None
                 if need_detail:
                     start_post, blocked = collect_thread(
@@ -491,6 +499,7 @@ def run(args: argparse.Namespace) -> int:
                         wait_range=wait_range,
                         collected=collected,
                         sort_by_likes=popular and RELATION_REPLY in relations,
+                        viewport=page_viewport,
                     )
 
                 eff_handle = start_handle or (start_post.author_handle if start_post else None)
@@ -506,6 +515,7 @@ def run(args: argparse.Namespace) -> int:
                             build_source_query(start_id, RELATION_QUOTE),
                             start_id, max_items, wait_range, collected,
                             scroll_script=quote_scroll_script(args.sort),
+                            viewport=page_viewport,
                         )
 
                 # ③同一投稿者
@@ -515,14 +525,13 @@ def run(args: argparse.Namespace) -> int:
                             context, f"https://x.com/{eff_handle}", "UserTweets",
                             build_source_query(start_id, RELATION_AUTHOR),
                             start_id, max_items, wait_range, collected,
+                            viewport=page_viewport,
                         )
                     else:
                         logger.warning(
                             "起点の投稿者ハンドルが特定できなかったため、同一投稿者の収集(author)をスキップします"
                         )
-            finally:
-                browser.close()
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, CdpConnectionError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return EXIT_ERROR
     except SessionExpiredError as exc:
