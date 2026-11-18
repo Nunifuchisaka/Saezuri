@@ -2,6 +2,8 @@
 
 X（旧Twitter）のキーワード検索・アカウント追跡・トレンド・ブックマークをPlaywrightで収集し、JSONLへ保存した上でMarkdownダイジェストを生成するツール。Instagram・Threads・TikTokの特定アカウントの投稿収集にも対応する。
 
+> **はじめて使う方（SNS担当者・パソコンに詳しくない方）へ**：Windowsで画面から使うまでの手順を [はじめてガイド（Windows）](docs/guide-windows.md) にまとめています。
+
 ## 目次
 
 - [免責事項](#免責事項)
@@ -78,7 +80,7 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
 
 ### 準備（最初の1回だけ）
 
-1. [Python](https://www.python.org/downloads/)（3.11以上）と[Google Chrome](https://www.google.com/chrome/)をインストールする。Pythonのインストール画面では「Add python.exe to PATH」にチェックを入れる。
+1. [Python](https://www.python.org/downloads/windows/)（3.11〜3.14。おすすめは3.14。最新の3.15は必要な部品が未対応で使えない）と[Google Chrome](https://www.google.com/chrome/)をインストールする。Pythonのインストール画面では「Add python.exe to PATH」にチェックを入れる。
 2. このリポジトリのページで「Code」→「Download ZIP」を押してダウンロードし、好きな場所に展開する。
 3. 展開したフォルダの`setup.bat`をダブルクリックする（数分かかる。「セットアップが終わりました」と出たら完了）。
 4. 収集専用のサブアカウントを用意する（[収集専用サブアカウントについて](#収集専用サブアカウントについて)）。会社の公式アカウントや個人の本アカウントは使わないこと。
