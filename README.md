@@ -89,7 +89,7 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
 | Xを検索 | キーワード・投稿者・期間・並び順（新しい順／話題）を指定して検索結果を集める。 |
 | アカウントを追う | X・Instagram・Threads・TikTokのアカウントの新しい投稿、またはフォロワー数など（Instagramは非対応）を集める。アカウント名を空欄にすると「設定」タブに登録した全アカウントを処理する。 |
 | 投稿の数字を取る | Xの投稿URL（最大50件）から、ログインせずに本文・いいね・リポスト・返信・引用・表示回数・画像を取得する（FxTwitter経由）。 |
-| 反応ランキング | 投稿URL（X・Instagram・Threads）に付いた返信・引用・コメントを集め、いいね数の多い順のランキング（Markdown）を作る。 |
+| 反応ランキング | 投稿URL（X・Instagram・Threads・TikTok）に付いた返信・引用・コメントを集め、いいね数の多い順のランキング（Markdown）を作る。 |
 | まとめ・Excel | 集めたデータを、Excelでそのまま開けるCSV、Markdownのまとめ、画像ファイルにする。直前に集めたファイルは自動で選ばれる。 |
 | 設定 | 追跡するアカウント、関心キーワード、ログイン用Chromeを使うか、使うブラウザを変更する（`config.yaml`を書き換え、前の内容は`config.yaml.bak`に残す）。 |
 
@@ -221,7 +221,7 @@ python scripts/pick.py data/raw/search_*.jsonl --handle aichan_nel --exclude-rep
 | `--keyword` | `text`／記事本文の部分一致（複数指定はOR・大文字小文字無視） |
 | `--since` / `--until` | `YYYY-MM-DD`（JST基準・両端含む） |
 | `--exclude-reposts` | リポストを除外 |
-| `--kind reply\|quote\|comment` | 関連収集（`related.py`／`ig_related.py`／`th_related.py`）の種別で絞る。`source_query`の末尾で判別（複数指定はOR） |
+| `--kind reply\|quote\|comment` | 関連収集（`related.py`／`ig_related.py`／`th_related.py`／`tt_related.py`）の種別で絞る。`source_query`の末尾で判別（複数指定はOR） |
 | `--top-per month\|none` / `--top N` | 月ごと（または全体）のエンゲージメント（like+repost+reply+quote）上位N件 |
 | `--format md\|jsonl` | 出力形式（既定: `md`。月見出し→日付(JST)・エンゲージメント・本文先頭100字・URL） |
 
@@ -323,17 +323,19 @@ python scripts/related.py --id 1234567890 --replies --quotes --top 20
 python scripts/related.py --id 1234567890 --sort recent                        # 従来の表示順で収集のみ
 python scripts/ig_related.py --url https://www.instagram.com/p/XXXXXXXXXXX/    # Instagramのコメント
 python scripts/th_related.py --url https://www.threads.com/@foo/post/XXXXXXXXXXX  # Threadsのリプライ+引用
+python scripts/tt_related.py --url https://www.tiktok.com/@foo/video/1234567890 --cdp http://127.0.0.1:9222  # TikTokのコメント
 ```
 
 | オプション | 説明 |
 |---|---|
-| `--url` | 起点投稿のURL（`related.py`は`--id`でも可。`ig_related.py`／`th_related.py`は必須） |
+| `--url` | 起点投稿のURL（`related.py`は`--id`でも可。`ig_related.py`／`th_related.py`／`tt_related.py`は必須） |
 | `--max` | 種別ごとの取得上限（既定: `config.yaml`の`max_items`）。Xの引用は話題・最新それぞれの上限、Threadsの引用は開く投稿数の上限 |
 | `--top` | Markdownに出す種別ごとの上位件数（既定: 10） |
 | `--sort popular\|recent` | `related.py`のみ。既定`popular`。`recent`は従来の表示順で収集し、Markdownは出さない |
 | `--replies` / `--quotes` / `--author` / `--unseen-only` | `related.py`のみ（従来どおり。`--author`の同一投稿者はランキング対象外） |
 | `--config` / `--browser` / `--headed` | 他スクリプトと同じ |
-| `--cdp` | `related.py`のみ。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照（人気順の画面サイズ1280x1000は開くタブごとに合わせる） |
+| `--wait-tab` | `tt_related.py`のみ。CDP接続時、動画のタブが無ければ手で開くのを待つ秒数（既定: 180） |
+| `--cdp` | `related.py`／`tt_related.py`。[X側のCDP接続](#自分のchromeにcdpで接続してx側を収集する--cdp)参照（人気順の画面サイズ1280x1000は開くタブごとに合わせる） |
 
 人気順への切り替えと直接返信の判定：
 
@@ -344,11 +346,13 @@ python scripts/th_related.py --url https://www.threads.com/@foo/post/XXXXXXXXXXX
 | Instagram（コメント） | 投稿ページの埋め込みJSON＋コメント欄スクロール | Web版に並び替えが無いため既定（人気順）のまま | トップレベルコメント（`in_reply_to_id`＝起点のメディアID） |
 | Threads（リプライ） | 投稿ページの埋め込みJSON＋スクロール | URLの`sort_order=top`（効かなければ並び替えメニューで「トップ」） | `reply_level == 1`かつ起点投稿者宛て |
 | Threads（引用） | 「アクティビティを見る」→「引用」タブの一覧から引用投稿を1件ずつ開く（アクセス間はランダム待機） | — | 引用一覧に載っているもの |
+| TikTok（コメント） | 管理人がChromeで開いた動画タブのコメント欄をスクロール（`/api/comment/list/`） | 並び替えは使わず既定の並びのまま | 返信でないコメント（`in_reply_to_id`＝動画ID） |
 
 - 並び替えメニュー・「アクティビティを見る」が見つからない等で切り替え（引用一覧）ができなかった場合は警告を出して既定の並びのまま続ける。429・チャレンジ・ログイン画面遷移は従来どおり即中断し、収集済み分を保存して終了コード2/3/4で終わる。
-- 保存先：`data/raw/related_<日付>_<連番>.jsonl`／`ig_related_<日付>_<連番>.jsonl`／`th_related_<日付>_<連番>.jsonl`（実行ごとに新規）。`source_query`は`related:<起点ID>:reply|quote|author`、`ig-related:<shortcode>:comment`、`th-related:<code>:reply|quote`。
-- 上位Markdown：`config.yaml`の`output.digest_dir`配下に`top_x_<起点ID>_<日付>.md`／`top_ig_<shortcode>_<日付>.md`／`top_th_<code>_<日付>.md`（同日の再実行は上書き）。各行は順位・いいね数・投稿者・日時(JST)・本文先頭100字・URL（全文転載はしない）。
-- 返信への返信（Instagramの子コメント・Threadsの孫返信）を展開する追加リクエストはしない。Xの会話スレッドに混ざる入れ子の返信はJSONLには残るがランキングからは除く。
+- 保存先：`data/raw/related_<日付>_<連番>.jsonl`／`ig_related_<日付>_<連番>.jsonl`／`th_related_<日付>_<連番>.jsonl`／`tt_related_<日付>_<連番>.jsonl`（実行ごとに新規）。`source_query`は`related:<起点ID>:reply|quote|author`、`ig-related:<shortcode>:comment`、`th-related:<code>:reply|quote`、`tt-related:<動画ID>:comment`。
+- 上位Markdown：`config.yaml`の`output.digest_dir`配下に`top_x_<起点ID>_<日付>.md`／`top_ig_<shortcode>_<日付>.md`／`top_th_<code>_<日付>.md`／`top_tt_<動画ID>_<日付>.md`（同日の再実行は上書き）。各行は順位・いいね数・投稿者・日時(JST)・本文先頭100字・URL（全文転載はしない）。
+- 返信への返信（Instagramの子コメント・Threadsの孫返信・TikTokのコメントへの返信）を展開する追加リクエストはしない。
+- **TikTokは自動操作で開いたタブから動画ページへ行くとHTTPエラー（403）で弾かれる。** そのため`tt_related.py`は`--cdp`で接続したChromeで、管理人が手で開いた動画タブを使う（新規タブは開かず、そのタブは読み込み直さず閉じもしない）。タブが無ければ案内を出して待つので、表示されたURLをそのChromeで開く。Xの会話スレッドに混ざる入れ子の返信はJSONLには残るがランキングからは除く。
 
 ### trends.py（トレンド把握）
 

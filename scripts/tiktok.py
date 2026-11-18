@@ -75,7 +75,12 @@ RELOGIN_MESSAGE = (
 ENDPOINT_PATTERNS = (
     (re.compile(r"https://(?:www\.)?tiktok\.com/api/post/item_list/"), "item_list"),
     (re.compile(r"https://(?:www\.)?tiktok\.com/api/user/detail/"), "user_detail"),
+    # 動画のコメント一覧(コメント欄スクロール時の追加読み込み)。返信展開の /api/comment/list/reply/ は対象外
+    (re.compile(r"https://(?:www\.)?tiktok\.com/api/comment/list/(?:\?|$)"), "comment_list"),
 )
+
+# 動画/フォト投稿のURL: https://www.tiktok.com/@<user>/video/<id> または /photo/<id>
+VIDEO_URL_RE = re.compile(r"^https?://(?:www\.|m\.)?tiktok\.com/@([^/?#]+)/(?:video|photo)/(\d+)")
 
 # カバー画像の優先順(最初に見つかった1件だけをphotoにする。重複保存を避けるため)
 COVER_KEYS = ("originCover", "cover", "dynamicCover")
@@ -382,4 +387,101 @@ def parse_tiktok_payload(
         post = _parse_tiktok_node(node, endpoint, source_query, collected_at)
         if post is not None:
             posts.append(post)
+    return posts
+
+
+# ---------------------------------------------------------------------------
+# コメント(tt_related.py用)
+# ---------------------------------------------------------------------------
+
+def parse_tiktok_video_url(url: str) -> tuple[str, str]:
+    """動画URLから(投稿者ユーザー名, 動画ID)を返す。形式外ならValueError。"""
+    match = VIDEO_URL_RE.match((url or "").strip())
+    if not match:
+        raise ValueError(
+            "TikTokの動画URL(https://www.tiktok.com/@<ユーザー名>/video/<動画ID>)を指定してください: "
+            f"{url}"
+        )
+    return match.group(1).lstrip("@"), match.group(2)
+
+
+def _is_tiktok_comment(node: dict) -> bool:
+    """コメントノードらしいか(cid + create_time + digg_count)。"""
+    cid = node.get("cid")
+    return (
+        isinstance(cid, (str, int))
+        and not isinstance(cid, bool)
+        and "create_time" in node
+        and "digg_count" in node
+    )
+
+
+def iter_tiktok_comments(payload: Any) -> Iterable[dict]:
+    """ペイロードからコメントノードを再帰探索で順に取り出す(内側の返信プレビューには潜らない)。"""
+    if isinstance(payload, dict):
+        if _is_tiktok_comment(payload):
+            yield payload
+            return
+        for value in payload.values():
+            yield from iter_tiktok_comments(value)
+    elif isinstance(payload, list):
+        for value in payload:
+            yield from iter_tiktok_comments(value)
+
+
+def _is_zero_id(value: Any) -> bool:
+    return value is None or str(value).strip() in ("", "0")
+
+
+def parse_tiktok_comments(
+    payload: dict,
+    endpoint: str = "",
+    video_id: str = "",
+    video_handle: str = "",
+    source_query: Optional[str] = None,
+    collected_at: Optional[str] = None,
+) -> list[Post]:
+    """コメント一覧APIのペイロードからコメントをPostのリストにする。
+
+    - id=cid、text=text、like_count=digg_count、reply_count=reply_comment_total、
+      repost_count/quote_count=0、lang=comment_language、作者=user.unique_id/nickname
+    - in_reply_to_id: 返信(reply_idが0以外)はreply_id、動画への直接コメントは動画ID(aweme_id)
+    - url: 動画URLにcomment_idを付けたもの(コメント単体のURLは無いため)
+    - 対象動画と異なるaweme_idのコメントは混入とみなしてスキップする
+    """
+    collected_at = collected_at or now_iso()
+    posts: list[Post] = []
+    for node in iter_tiktok_comments(payload):
+        cid = str(node["cid"])
+        user = node.get("user") if isinstance(node.get("user"), dict) else {}
+        handle = user.get("unique_id") or user.get("uniqueId")
+        if not isinstance(handle, str) or not handle:
+            logger.warning("%s: コメント投稿者(user.unique_id)が見つからないため1件スキップします(cid=%s)",
+                           endpoint, cid)
+            continue
+        aweme_id = node.get("aweme_id")
+        aweme_id = str(aweme_id) if not _is_zero_id(aweme_id) else video_id
+        if video_id and aweme_id != video_id:
+            continue
+        reply_id = node.get("reply_id")
+        in_reply_to = str(reply_id) if not _is_zero_id(reply_id) else aweme_id
+        owner = video_handle or handle
+        language = node.get("comment_language")
+        posts.append(Post(
+            id=cid,
+            url=f"https://www.tiktok.com/@{owner}/video/{aweme_id}?comment_id={cid}",
+            author_handle=handle,
+            author_name=user.get("nickname") or "",
+            created_at=_timestamp_to_iso(node.get("create_time")),
+            text=node.get("text") or "",
+            like_count=_to_int(node.get("digg_count")),
+            repost_count=0,
+            reply_count=_to_int(node.get("reply_comment_total")),
+            quote_count=0,
+            lang=language if isinstance(language, str) and language and language != "un" else None,
+            media=[],
+            in_reply_to_id=in_reply_to,
+            source_query=source_query,
+            collected_at=collected_at,
+        ))
     return posts

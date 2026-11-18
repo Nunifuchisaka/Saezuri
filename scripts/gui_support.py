@@ -55,6 +55,7 @@ RELATED_SCRIPTS = {
     SNS_X: "related.py",
     SNS_INSTAGRAM: "ig_related.py",
     SNS_THREADS: "th_related.py",
+    SNS_TIKTOK: "tt_related.py",
 }
 
 # config.yaml上の監視アカウントの場所（Noneはトップレベル）
@@ -190,9 +191,9 @@ def build_related_command(url: str, top: str = "", max_items: str = "") -> tuple
         raise InputError("投稿のURLを入力してください。")
     sns = detect_sns_from_url(url)
     if sns is None:
-        raise InputError("X・Instagram・Threadsの投稿URLを入力してください。")
+        raise InputError("X・Instagram・Threads・TikTokの投稿URLを入力してください。")
     if sns not in RELATED_SCRIPTS:
-        raise InputError("TikTokの投稿の反応ランキングには対応していません。")
+        raise InputError("この投稿の反応ランキングには対応していません。")
     args = ["--url", url]
     top_v = _parse_positive_int(top, "上位件数")
     if top_v:

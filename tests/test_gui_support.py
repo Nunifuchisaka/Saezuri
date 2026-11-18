@@ -121,7 +121,8 @@ def test_build_related_command():
     assert g.build_related_command("https://x.com/example_a/status/1", "5") == (
         "related.py", ["--url", "https://x.com/example_a/status/1", "--top", "5"])
     assert g.build_related_command("https://www.instagram.com/p/AAA/")[0] == "ig_related.py"
-    for bad in ("", "https://example.com/", "https://www.tiktok.com/@example_t/video/1"):
+    assert g.build_related_command("https://www.tiktok.com/@example_t/video/1")[0] == "tt_related.py"
+    for bad in ("", "https://example.com/"):
         with pytest.raises(g.InputError):
             g.build_related_command(bad)
 

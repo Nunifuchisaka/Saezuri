@@ -33,9 +33,9 @@ JST = timezone(timedelta(hours=9))
 X_DATETIME_FORMAT = "%a %b %d %H:%M:%S %z %Y"
 SUMMARY_LENGTH = 100
 
-# 関連収集(related.py / ig_related.py / th_related.py)のsource_query: <接頭辞>:<起点>:<種別>
+# 関連収集(related.py / ig_related.py / th_related.py / tt_related.py)のsource_query: <接頭辞>:<起点>:<種別>
 KINDS = ("reply", "quote", "comment")
-_KIND_SOURCE_RE = re.compile(r"^(?:related|ig-related|th-related):[^:]+:(\w+)$")
+_KIND_SOURCE_RE = re.compile(r"^(?:related|ig-related|th-related|tt-related):[^:]+:(\w+)$")
 
 
 def parse_date_arg(value: str) -> date:
