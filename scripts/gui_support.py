@@ -379,7 +379,9 @@ def chrome_candidates(platform: str = sys.platform, env: Optional[dict] = None) 
                  env.get("LOCALAPPDATA", "")]
         return [str(Path(r) / "Google" / "Chrome" / "Application" / "chrome.exe") for r in roots if r]
     if platform == "darwin":
-        return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+        app = "Google Chrome.app/Contents/MacOS/Google Chrome"
+        home = env.get("HOME") or os.path.expanduser("~")
+        return [f"/Applications/{app}", str(Path(home) / "Applications" / app)]
     return ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]
 
 

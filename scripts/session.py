@@ -24,12 +24,13 @@ X_HOME_URL = "https://x.com/home"
 # 起動可能なブラウザエンジン(Playwrightが提供する3種 + Brave)
 SUPPORTED_BROWSERS = ("chromium", "firefox", "webkit", "brave")
 
-# Brave実行ファイルの自動探索候補パス(Windows運用前提のため優先的にWindows候補を並べる)
+# Brave実行ファイルの自動探索候補パス(Windows→macOS→Linuxの順。存在する最初の1件を使う)
 BRAVE_DEFAULT_PATHS = (
     r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
     os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    os.path.expanduser("~/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
     "/usr/bin/brave-browser",
 )
 
@@ -103,8 +104,8 @@ def connect_cdp(playwright, cdp_url: str):
     except Exception as exc:
         raise CdpConnectionError(
             f"Chromeにデバッグポートで接続できません: {cdp_url}\n"
-            "Chromeを `chrome.exe --remote-debugging-port=9222 --user-data-dir=<専用プロファイル>` で"
-            "起動しているか、URLとポートが合っているか確認してください。"
+            "Chromeを `--remote-debugging-port=9222 --user-data-dir=<専用プロファイル>` を付けて"
+            "起動しているか(GUIなら「ログイン用Chromeを開く」)、URLとポートが合っているか確認してください。"
             f"(詳細: {exc})"
         ) from exc
     if not browser.contexts:

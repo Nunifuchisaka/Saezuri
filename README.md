@@ -74,7 +74,7 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
 
 ## 画面で使う（GUI・非エンジニア向け）
 
-コマンドを打たずに、画面のボタンだけでログイン・収集・Excel用CSVの作成までできる。中身は下の「使い方」にある各スクリプトを1本ずつ呼び出しているだけで、収集のやり方や制約（オンデマンド実行、自動ログインなし、429やCAPTCHAを検知したら即中断）は同じ。画面はHTML/CSSで作り、[pywebview](https://pywebview.flowrl.com/)で専用ウィンドウとして開く（WindowsはEdge WebView2を使う。Windows 10/11には標準で入っている）。現在はWindows向け（Macは`python scripts/gui.py`で起動できるが未確認）。
+コマンドを打たずに、画面のボタンだけでログイン・収集・Excel用CSVの作成までできる。中身は下の「使い方」にある各スクリプトを1本ずつ呼び出しているだけで、収集のやり方や制約（オンデマンド実行、自動ログインなし、429やCAPTCHAを検知したら即中断）は同じ。画面はHTML/CSSで作り、[pywebview](https://pywebview.flowrl.com/)で専用ウィンドウとして開く（WindowsはEdge WebView2を使う。Windows 10/11には標準で入っている）。Windows向けに作っており、Macでも動くようにしてある（MacはOS標準のWebKitで画面を出す。手順と未確認の点は[Macで使う](#macで使う)を参照）。
 
 ### 準備（最初の1回だけ）
 
@@ -85,7 +85,7 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
 
 ### 起動と使い方
 
-`start_gui.bat`をダブルクリックすると画面が開く。
+`start_gui.bat`をダブルクリックすると画面が開く（Macは`start_gui.command`）。
 
 | メニュー | できること |
 | --- | --- |
@@ -101,11 +101,33 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
 
 「結果を開く」などで画面から開けるのは、収集結果のフォルダ（`data/raw`・`digest`・`data/media`）の中のファイルだけ。CSVにするとき、`=`・`+`・`-`・`@`で始まるセルは先頭に`'`を付けて、Excelが数式として実行しないようにしている（他人が書いた本文が式として動くのを防ぐため）。
 
+### Macで使う
+
+Windowsの`setup.bat`・`start_gui.bat`の代わりに、`setup.command`・`start_gui.command`を使う。それ以外の使い方は同じ。
+
+1. [Python](https://www.python.org/downloads/)（3.11以上、macOS用のインストーラー）と[Google Chrome](https://www.google.com/chrome/)をインストールする。Macに最初から入っている`python3`は古い（3.9）ことが多く使えない。Homebrewの`python@3.12`等でもよい。
+2. ZIPを展開したフォルダの`setup.command`をダブルクリックする。ターミナルが開いてセットアップが進む（python.org版のPythonでHTTPS用の証明書が未設定なら、`Install Certificates.command`も自動で実行する）。
+3. `start_gui.command`をダブルクリックすると画面が開く。開いた後はターミナルの窓を閉じてよい。起動できないときの手がかりは`logs/gui.log`に残る。
+
+ダブルクリックで「開発元が未確認のため開けません」と出た場合は、ファイルを右クリック（またはControlキーを押しながらクリック）→「開く」→「開く」を押す。それでも開けない場合は「システム設定」→「プライバシーとセキュリティ」の下の方にある「このまま開く」を押す（インターネットから落としたファイルにmacOSが付ける制限で、最初の1回だけ）。ターミナルに慣れていれば、フォルダで`bash setup.command`・`bash start_gui.command`と打っても同じ。
+
+コマンドで使う場合は、[セットアップ](#セットアップ)のWindows用コマンドを次のように読み替える：`py -3.11 -m venv .venv`→`python3.12 -m venv .venv`（3.11以上なら版は問わない）、`.venv\Scripts\Activate.ps1`→`source .venv/bin/activate`、`.venv\Scripts\python.exe`→`.venv/bin/python`。ログイン用Chromeを自分で起動する場合は`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/chrome-saezuri-profile"`（Chromeを普段使いで開いていても、専用プロファイルなら別に起動できる）。
+
+**確認状況**：作者はMacを持っていないため、Macの実機では確認していない。GitHub ActionsのmacOS環境（`.github/workflows/macos.yml`）で、毎回次のことを自動で確かめている。
+
+- `setup.command`でセットアップが終わること、単体テストが通ること
+- 画面（pywebview＋WebKit）が開き、画面からPython側を呼べること（スクリーンショットはActionsの実行結果の「macos-smoke」に残る）
+- 画面からの実行と同じ経路でスクリプト（`digest.py`）が動き、出力ファイルを拾えること
+- 「ログイン用Chromeを開く」でMacのChromeが見つかって起動し、デバッグポートで接続できること
+- `start_gui.command`で画面が起動したままになること
+
+次のことは**未確認**：Finderからのダブルクリックで開くか（上の「開けません」の対処を含む）、実際のSNSへのログインと収集、ファイル選択・保存のダイアログ、「Excelで開く」（CSVはNumbersなど既定のアプリで開く）、Apple Silicon以外（Intel Mac）、日本語の表示崩れ。おかしな点があれば、`logs/gui.log`と画面の「実行状況」の内容を添えて知らせてほしい。
+
 集めたデータには他人の投稿や個人情報が含まれる。手元での分析にとどめ、そのまま外部や一般に転載・再配布しないこと。仕事で使う場合の注意は[免責事項](#免責事項)を参照。
 
 ## セットアップ
 
-初回のみ、以下の手順で環境を作る（コマンドはすべてプロジェクトルートで実行）。画面（GUI）だけで使う場合は、手順1〜4の代わりに`setup.bat`をダブルクリックすればよい。
+初回のみ、以下の手順で環境を作る（コマンドはすべてプロジェクトルートで実行）。画面（GUI）だけで使う場合は、手順1〜4の代わりに`setup.bat`（Macは`setup.command`）をダブルクリックすればよい。Macでのコマンドの読み替えは[Macで使う](#macで使う)を参照。
 
 1. Python 3.11の仮想環境を作成する
    ```
@@ -124,7 +146,7 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
    playwright install chromium
    ```
    `config.yaml`の`browser`で`firefox`／`webkit`を使う場合は、それぞれ`playwright install firefox` / `playwright install webkit`も実行する。`brave`を使う場合、追加インストールは不要（Chromiumエンジンをそのまま使うため）だが、事前にBraveブラウザ本体をインストールしておくこと。
-5. `config.example.yaml`を`config.yaml`という名前でコピーして編集する（コピーし忘れても、`setup.bat`・GUI・各スクリプトが初回に自動でコピーする。`config.yaml`は`.gitignore`で追跡対象外なので、監視アカウント等を書いてもリポジトリには入らない）（`watch_accounts`＝追跡したいXハンドル、`interest_keywords`＝トレンド絞り込み・タグ付けに使う関心キーワード、取得上限・待機秒・出力先パス、起動するブラウザエンジン（`browser`）など。詳細は[設定ファイル](#設定ファイルconfigyaml)を参照）
+5. `config.example.yaml`を`config.yaml`という名前でコピーして編集する（コピーし忘れても、`setup.bat`/`setup.command`・GUI・各スクリプトが初回に自動でコピーする。`config.yaml`は`.gitignore`で追跡対象外なので、監視アカウント等を書いてもリポジトリには入らない）（`watch_accounts`＝追跡したいXハンドル、`interest_keywords`＝トレンド絞り込み・タグ付けに使う関心キーワード、取得上限・待機秒・出力先パス、起動するブラウザエンジン（`browser`）など。詳細は[設定ファイル](#設定ファイルconfigyaml)を参照）
 6. 手動ログインを実行する
    ```
    python scripts/login.py
@@ -570,7 +592,7 @@ TikTokの特定アカウントの投稿を、Instagram・Threads収集と同じ�
 | `tiktok.cdp_url` | 管理人のChromeにCDPで接続する際の接続先（例: `http://127.0.0.1:9222`）。`--cdp`省略時の既定で、空ならstorage_state方式 |
 | `browser_executable_path` | `brave`使用時のみ必要。Brave実行ファイルの絶対パス。空／未指定なら一般的なインストール場所を自動探索する |
 
-いずれもプロジェクトルートからの相対パスで指定する（`browser_executable_path`は絶対パス）。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要（[セットアップ](#セットアップ)参照）。`brave`使用時、自動検出（`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`等の一般的なインストール場所を順に確認）に失敗する場合は`browser_executable_path`に絶対パスを指定すること。
+いずれもプロジェクトルートからの相対パスで指定する（`browser_executable_path`は絶対パス）。`firefox`／`webkit`を使う場合は事前に`playwright install firefox` / `playwright install webkit`が必要（[セットアップ](#セットアップ)参照）。`brave`使用時、自動検出（`C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`や`/Applications/Brave Browser.app`等の一般的なインストール場所を順に確認）に失敗する場合は`browser_executable_path`に絶対パスを指定すること。
 
 ## 出力ファイルについて
 
