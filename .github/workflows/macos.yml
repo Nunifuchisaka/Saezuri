@@ -1,0 +1,58 @@
+# macOSでの動作確認（管理人はMacを持っていないため、GitHubのmacOSランナーで確かめる）
+# - setup.command をそのまま実行してセットアップできるか
+# - 単体テスト（pytest）
+# - GUIを実際に開いてJS⇔Pythonがつながるか・スクリーンショット、GUI経由のスクリプト実行、
+#   ログイン用Chromeの起動とCDP接続（.github/scripts/macos_smoke.py。SNSにはログインせず収集もしない）
+# - start_gui.command で画面のプロセスが起動したままになるか
+# スクリーンショットは Actions の実行結果の Artifacts（macos-smoke）から見られる。
+
+name: macOS check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: setup.command でセットアップ
+        run: ./setup.command
+
+      - name: 単体テスト
+        run: .venv/bin/python -m pytest -q tests
+
+      - name: GUI・スクリプト実行・ログイン用Chromeの確認
+        run: .venv/bin/python .github/scripts/macos_smoke.py smoke-out
+
+      - name: start_gui.command で画面が起動したままになるか
+        run: |
+          ./start_gui.command
+          sleep 15
+          if pgrep -f "scripts/gui.py" >/dev/null; then
+            echo "画面のプロセスが動いています"
+            screencapture -x smoke-out/start_gui_command.png || true
+            pkill -f "scripts/gui.py"
+          else
+            echo "画面のプロセスが起動していません"; cat logs/gui.log; exit 1
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos-smoke
+          path: |
+            smoke-out/
+            logs/
+          if-no-files-found: ignore

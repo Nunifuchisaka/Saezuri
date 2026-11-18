@@ -4,7 +4,8 @@
 pywebview で専用ウィンドウとして開く（WindowsはEdge WebView2を使う。Windows 10/11には標準で入っている）。
 収集のやり方（オンデマンド実行・自動ログインなし・429やCAPTCHA検知で即中断）は各スクリプトのまま。
 
-起動: プロジェクトルートの `start_gui.bat`（Windows）、または `python scripts/gui.py`
+macOSはOS標準のWebKit（WKWebView）を使う（pywebviewがpyobjc経由で呼ぶ。追加インストール不要）。
+起動: プロジェクトルートの `start_gui.bat`（Windows）／`start_gui.command`（macOS）、または `python scripts/gui.py`
 """
 
 from __future__ import annotations
@@ -24,8 +25,20 @@ def _alert(text: str) -> None:
         import ctypes
 
         ctypes.windll.user32.MessageBoxW(None, text, "saezuri", 0x10)
-    else:
-        print(text, file=sys.stderr)
+        return
+    print(text, file=sys.stderr)
+    if sys.platform == "darwin":
+        # ターミナルを閉じた後でも見えるように、OS標準のダイアログでも出す
+        import subprocess
+
+        # 文字列はAppleScriptに埋め込まず引数で渡す（引用符などで壊れないように）
+        cmd = ["osascript", "-e", "on run argv",
+               "-e", 'display dialog (item 1 of argv) with title "saezuri" buttons {"OK"} with icon caution',
+               "-e", "end run", text]
+        try:
+            subprocess.run(cmd, timeout=600, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
 
 
 class WebviewDialogs:
@@ -60,7 +73,7 @@ def main() -> int:
     try:
         import webview
     except ImportError:
-        _alert("画面の部品（pywebview）が入っていません。saezuriのフォルダの setup.bat をダブルクリックしてから、"
+        _alert("画面の部品（pywebview）が入っていません。saezuriのフォルダの setup.bat（Macは setup.command）をダブルクリックしてから、"
                "もう一度起動してください。")
         return 1
     try:
