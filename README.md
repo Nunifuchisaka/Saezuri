@@ -105,13 +105,13 @@ saezuriは、VRChat動画台本・note記事のネタ・リサーチ用に、X�
 
 Windowsの`setup.bat`・`start_gui.bat`の代わりに、`setup.command`・`start_gui.command`を使う。それ以外の使い方は同じ。
 
-1. [Python](https://www.python.org/downloads/)（3.11以上、macOS用のインストーラー）と[Google Chrome](https://www.google.com/chrome/)をインストールする。Macに最初から入っている`python3`は古い（3.9）ことが多く使えない。Homebrewの`python@3.12`等でもよい。
+1. [Python](https://www.python.org/downloads/)（3.11〜3.14、macOS用のインストーラー。3.15以上は部品の配布物がまだ無く使えない）と[Google Chrome](https://www.google.com/chrome/)をインストールする。Macに最初から入っている`python3`は古い（3.9）ことが多く使えない。Homebrewの`python@3.12`等でもよい。
 2. ZIPを展開したフォルダの`setup.command`をダブルクリックする。ターミナルが開いてセットアップが進む（python.org版のPythonでHTTPS用の証明書が未設定なら、`Install Certificates.command`も自動で実行する）。
 3. `start_gui.command`をダブルクリックすると画面が開く。開いた後はターミナルの窓を閉じてよい。起動できないときの手がかりは`logs/gui.log`に残る。
 
 ダブルクリックで「開発元が未確認のため開けません」と出た場合は、ファイルを右クリック（またはControlキーを押しながらクリック）→「開く」→「開く」を押す。それでも開けない場合は「システム設定」→「プライバシーとセキュリティ」の下の方にある「このまま開く」を押す（インターネットから落としたファイルにmacOSが付ける制限で、最初の1回だけ）。ターミナルに慣れていれば、フォルダで`bash setup.command`・`bash start_gui.command`と打っても同じ。
 
-コマンドで使う場合は、[セットアップ](#セットアップ)のWindows用コマンドを次のように読み替える：`py -3.11 -m venv .venv`→`python3.12 -m venv .venv`（3.11以上なら版は問わない）、`.venv\Scripts\Activate.ps1`→`source .venv/bin/activate`、`.venv\Scripts\python.exe`→`.venv/bin/python`。ログイン用Chromeを自分で起動する場合は`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/chrome-saezuri-profile"`（Chromeを普段使いで開いていても、専用プロファイルなら別に起動できる）。
+コマンドで使う場合は、[セットアップ](#セットアップ)のWindows用コマンドを次のように読み替える：`py -3.11 -m venv .venv`→`python3.14 -m venv .venv`（3.11〜3.14なら版は問わない）、`.venv\Scripts\Activate.ps1`→`source .venv/bin/activate`、`.venv\Scripts\python.exe`→`.venv/bin/python`。ログイン用Chromeを自分で起動する場合は`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/chrome-saezuri-profile"`（Chromeを普段使いで開いていても、専用プロファイルなら別に起動できる）。
 
 **確認状況**：作者はMacを持っていないため、Macの実機では確認していない。GitHub ActionsのmacOS環境（`.github/workflows/macos.yml`）で、毎回次のことを自動で確かめている。
 

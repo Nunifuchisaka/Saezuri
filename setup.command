@@ -24,14 +24,15 @@ echo " saezuri のセットアップ（初回だけ実行します）"
 echo "============================================"
 echo
 
-# Python 3.11以上を探す。macOS標準の /usr/bin/python3 は古い（3.9）ことが多いので版を確かめる。
+# Python 3.11〜3.14を探す。macOS標準の /usr/bin/python3 は古い（3.9）ことが多いので版を確かめる。
+# 3.15以上は、使っている部品（PyYAML）の配布物がまだ無いので避ける。
 find_python() {
   local c
-  for c in python3.13 python3.12 python3.11 python3 \
-           /Library/Frameworks/Python.framework/Versions/3.1[1-9]/bin/python3 \
+  for c in python3.14 python3.13 python3.12 python3.11 python3 \
+           /Library/Frameworks/Python.framework/Versions/3.1[1-4]/bin/python3 \
            /opt/homebrew/bin/python3 /usr/local/bin/python3; do
     if command -v "$c" >/dev/null 2>&1 &&
-       "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
+       "$c" -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 14) else 1)' >/dev/null 2>&1; then
       command -v "$c"
       return 0
     fi
@@ -41,8 +42,9 @@ find_python() {
 
 PY="$(find_python)"
 if [ -z "$PY" ]; then
-  echo "Python 3.11 以上が見つかりません。"
-  echo "https://www.python.org/downloads/ から macOS 用の Python をインストールしてから、"
+  echo "使える Python（3.11〜3.14）が見つかりません。"
+  echo "https://www.python.org/downloads/ から macOS 用の Python 3.14 をインストールしてから、"
+  echo "（3.15 以上しか入っていない場合も、3.14 を追加でインストールしてください。両方入れておいて問題ありません）"
   echo "もう一度この setup.command をダブルクリックしてください。"
   pause
   exit 1
