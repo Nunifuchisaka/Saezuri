@@ -54,7 +54,7 @@ PY_VER="$("$PY" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[
 CERT_CMD="/Applications/Python ${PY_VER}/Install Certificates.command"
 if ! "$PY" -c 'import ssl, os, sys; p = ssl.get_default_verify_paths(); sys.exit(0 if (p.cafile and os.path.exists(p.cafile)) or (p.capath and os.path.isdir(p.capath) and os.listdir(p.capath)) else 1)' >/dev/null 2>&1; then
   if [ -f "$CERT_CMD" ]; then
-    echo "[0/3] HTTPS用の証明書を入れています..."
+    echo "[0/3] HTTPS用の証明書を入れています（Python付属の「Install Certificates.command」で certifi を入れます）..."
     bash "$CERT_CMD" || echo "（証明書の設定に失敗しました。あとで「$CERT_CMD」をダブルクリックしてください）"
   fi
 fi

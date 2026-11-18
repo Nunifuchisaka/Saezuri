@@ -12,6 +12,7 @@ SNSにはログインせず、収集もしない。失敗したら終了コー�
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -126,6 +127,10 @@ def chrome_check() -> None:
 
 
 def main() -> int:
+    # 手元で動かすと、ログイン済みの専用Chromeを終了させ、data/raw・digestに合成データを残してしまう
+    if not os.environ.get("CI"):
+        print("これはCI専用です（ログイン用Chromeを終了させ、data/rawに試験データを書き込むため）。", file=sys.stderr)
+        return 1
     steps = sys.argv[2].split(",") if len(sys.argv) > 2 else ["job", "chrome", "gui"]
     if "job" in steps:
         run_job_check()
@@ -138,9 +143,8 @@ def main() -> int:
     failed = [k for k, v in results.items() if v.startswith("NG")]
     print("失敗: " + ", ".join(failed) if failed else "すべてOK", flush=True)
     sys.stdout.flush()
-    import os
     os._exit(1 if failed else 0)  # 残ったタイマースレッドを待たずに終える
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

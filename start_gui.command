@@ -10,5 +10,17 @@ fi
 # 起動に失敗したときの手がかりは logs/gui.log に残す。
 mkdir -p logs
 nohup .venv/bin/python scripts/gui.py >logs/gui.log 2>&1 &
+PID=$!
 disown
-echo "saezuri の画面を起動しました。このターミナルの窓は閉じてかまいません。"
+# 起動直後に落ちていないか、少し待って確かめる
+sleep 3
+if kill -0 "$PID" 2>/dev/null; then
+  echo "saezuri の画面を起動しました。このターミナルの窓は閉じてかまいません。"
+else
+  echo "画面を起動できませんでした。以下のメッセージを確認してください（logs/gui.log）:"
+  echo
+  cat logs/gui.log
+  echo
+  read -r -p "Enterキーを押すと閉じます..." _
+  exit 1
+fi
