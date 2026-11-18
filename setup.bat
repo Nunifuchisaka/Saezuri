@@ -20,6 +20,10 @@ if exist ".venv\Scripts\python.exe" (
     rmdir /s /q ".venv"
   )
 )
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -c "%PY_RANGE%" >nul 2>nul
+  if errorlevel 1 goto venv_locked
+)
 if exist ".venv\Scripts\python.exe" goto install
 
 call :find_python
@@ -80,6 +84,13 @@ echo 次のページから Python 3.14 をインストールしてから、も�
 echo   https://www.python.org/downloads/windows/
 echo   （「Python 3.14.x」の「Download Windows installer (64-bit)」を選びます）
 echo すでに入っている Python はそのままで構いません（並べて使えます）。
+echo.
+pause
+exit /b 1
+
+:venv_locked
+echo 作業用の環境（.venv フォルダ）を消せませんでした。
+echo saezuri の画面を開いていたら閉じてから、もう一度この setup.bat をダブルクリックしてください。
 echo.
 pause
 exit /b 1
