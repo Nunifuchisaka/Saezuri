@@ -1,0 +1,16 @@
+{
+  "Api.runで子プロセス起動": "OK: {'ok': True, 'title': 'まとめ作成'}",
+  "digest.pyが正常終了": "OK: code=0 lines=['入力ファイル: 1件 / ポスト: 3件 / トレンド語: 0件', '出力: digest\\\\digest_20261118_065855.md']",
+  "出力パスを拾える": "OK: ['digest\\\\digest_20261118_065855.md']",
+  "CSVを書き出せる": "OK: {'ok': True, 'path': 'D:\\\\a\\\\Saezuri\\\\Saezuri\\\\data\\\\raw\\\\search_20261118_001.csv', 'rows': 3}",
+  "ログイン用Chromeを起動": "OK: {'ok': True, 'enabled_cdp': True}",
+  "デバッグポート(9222)で待ち受け": "OK",
+  "PlaywrightからCDP接続": "OK: pages=2",
+  "画面からPython側を呼べる": "OK",
+  "ログイン状況の表示": "OK: 'XChrome未起動Instagram未ログインThreads未ログインTikTokChrome未起動'",
+  "日本語の見出しが出る": "OK: '準備（ログイン）'",
+  "ウィンドウの位置": "OK: (7, 0, 1186, 813)",
+  "画面から実行して完了表示": "OK",
+  "スクリーンショット": "OK: gui_account.png, gui_fx.png, gui_related.png, gui_report.png, gui_report_done.png, gui_search.png, gui_settings.png, gui_setup.png",
+  "gui.main()の終了コード": "OK: 0"
+}
