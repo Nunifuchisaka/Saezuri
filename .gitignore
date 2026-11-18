@@ -11,3 +11,4 @@ seen_ids.json
 state/
 digest/
 data/media/
+*.log
