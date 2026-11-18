@@ -43,7 +43,7 @@ python scripts/tt_login.py                                        # TikTokの初
 python scripts/tt_user_posts.py                                   # tiktok.watch_accounts全件の投稿追跡(CAPTCHA検知で即中断)
 python scripts/tt_profiles.py                                     # tiktok.watch_accounts全件のフォロワー数等プロフィール取得
 python scripts/fx_tweet.py --url https://x.com/foo/status/123    # ログイン不要で投稿1件ずつの本文・数値を取得(FxTwitter API)
-python scripts/gui.py                                             # 非エンジニア向けGUI（Windowsはstart_gui.batをダブルクリック。初回はsetup.bat）
+python scripts/gui.py                                             # 非エンジニア向けGUI（Windowsはstart_gui.bat・Macはstart_gui.commandをダブルクリック。初回はsetup.bat/setup.command）
 ```
 
 `tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`・`tests/test_threads_parse.py`は`instagram.py`・`threads.py`の投稿正規化ロジックを検証する。`tests/test_tiktok_parse.py`・`test_tt_profiles_parse.py`・`test_tt_user_posts.py`は`tiktok.py`・`tt_profiles.py`・`tt_user_posts.py`の正規化・CAPTCHA検知ロジックを合成データで検証する。起点投稿のリプライ・引用・コメント上位抽出は`test_ranking.py`(ランキング・Markdown)・`test_related.py`・`test_related_scripts_meta.py`(各スクリプトの純関数)・`test_capture_reply_to.py`(Xの`in_reply_to_id`)・`test_instagram_comments.py`(IGコメント・shortcode変換)・`test_threads_related.py`(Threads返信・引用一覧)・`test_tt_related.py`(TikTokコメント・動画URL・タブ待ち)・`test_capture_scroll.py`(スクロールJS差し替え)で検証する。テストのfixtureは実データを使わず、ユーザー名・本文・ID・URLを架空値にした合成データにすること）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
@@ -158,6 +158,7 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 - 設定画面の保存は`config.yaml`を行単位で書き換え（前の内容を`config.yaml.bak`に退避、YAMLとして読めない結果は書かない）。
 - `setup.bat`（venv作成・pip・`playwright install chromium`）と`start_gui.bat`（`pythonw`で起動）はUTF-8＋CRLF（`.gitattributes`で固定）。`setup.bat`はPythonを3.14→3.13→3.12→3.11の順に`py -<版>`で選ぶ（3.15以上は`PyYAML==6.0.3`のwheelが無いため使わない。無ければPython install managerの`py install 3.14`、それも無理なら案内して終了）。対応外の版で作った`.venv`は作り直す。
 - Windowsでの確認はGitHub Actionsの`.github/workflows/windows.yml`（windows-latest、3.15と3.14を入れた状態で`setup.bat`→pytest→`.github/scripts/windows_smoke.py`（GUIを開いて各画面のスクリーンショット・画面からの実行・CSV・ログイン用ChromeのCDP接続）→`start_gui.bat`）。SNS担当者向けの手順書は`docs/guide-windows.md`で、画像`docs/images/guide/`はこのCIの成果物（windows-smoke）から取っている。画面を変えたら撮り直す。
+- macOS用は`setup.command`（Python 3.11〜3.14を新しい順に探して版を確認。3.15以上はPyYAML 6.0.3のwheelが無いので避ける→venv→pip→`playwright install chromium`。python.org版で証明書が無ければ`Install Certificates.command`を実行。`CI`環境変数か端末なしなら最後の「Enterで閉じる」待ちをしない）と`start_gui.command`（`nohup`でターミナルから切り離して起動、ログは`logs/gui.log`）。LF＋実行ビット（`.gitattributes`・`git update-index --chmod=+x`）。OS依存の分岐は`gui.py`の`_alert`（Macは`osascript`のダイアログ）、`gui_api.open_in_os`（Macは`open`）、`gui_support.chrome_candidates`（`/Applications`と`~/Applications`）、`session.BRAVE_DEFAULT_PATHS`。管理人はMacを持っていないので、Macの確認は`.github/workflows/macos.yml`（macOSランナーで`setup.command`→pytest→`.github/scripts/macos_smoke.py`（GUIを開いてJS⇔Python・スクショ、GUI経由の`digest.py`実行、ログイン用Chrome起動とCDP接続）→`start_gui.command`）で行う。実機未確認の点はREADMEの「Macで使う」に列挙している。
 
 ### `pick.py`（収集系と非依存）
 

@@ -205,6 +205,14 @@ def test_find_chrome_and_command():
                    "--no-first-run", "--no-default-browser-check", "https://x.com/login"]
 
 
+def test_find_chrome_macos():
+    app = "Google Chrome.app/Contents/MacOS/Google Chrome"
+    assert g.find_chrome("darwin", {"HOME": "/Users/example"}, exists=lambda p: True) == f"/Applications/{app}"
+    # 管理者権限なしでホームの「アプリケーション」に入れた場合も見つける
+    user_app = f"/Users/example/Applications/{app}"
+    assert g.find_chrome("darwin", {"HOME": "/Users/example"}, exists=lambda p: p == user_app) == user_app
+
+
 def test_extract_output_path():
     assert g.extract_output_path("保存先: data/raw/search_20260101_001.jsonl") == "data/raw/search_20260101_001.jsonl"
     assert g.extract_output_path("上位Markdown: digest/top_x_1_20260101.md\n") == "digest/top_x_1_20260101.md"
