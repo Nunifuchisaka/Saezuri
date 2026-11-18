@@ -381,7 +381,8 @@ def chrome_candidates(platform: str = sys.platform, env: Optional[dict] = None) 
     if platform == "darwin":
         app = "Google Chrome.app/Contents/MacOS/Google Chrome"
         home = env.get("HOME") or os.path.expanduser("~")
-        return [f"/Applications/{app}", str(Path(home) / "Applications" / app)]
+        # Macのパスなので、どのOSで動かしても / で組み立てる（WindowsのPathだと \\ になる）
+        return [f"/Applications/{app}", f"{home.rstrip('/')}/Applications/{app}"]
     return ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]
 
 
