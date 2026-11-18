@@ -65,7 +65,7 @@
           <span class="range"><input name="since" type="date"><span class="arrow">→</span><input name="until" type="date"></span>
           <small>終了日は含みません</small>
         </label>
-        <label>最大件数<input name="max" inputmode="numeric" placeholder="空欄なら設定の値（既定100件）"></label>
+        <label>最大件数<input name="max" inputmode="numeric" placeholder="空欄なら設定の値（既定100件、最大500件）"></label>
       </div>
       <div class="actions between">
         <div class="seg" data-name="mode"><button type="button" data-value="live" class="on">新しい順</button><button type="button" data-value="top">話題の投稿</button></div>
@@ -87,7 +87,7 @@
       </div>
       <div class="grid2">
         <label>アカウント名（任意）<input name="account" placeholder="空欄なら「設定」の全アカウント。URLを貼ってもOK"></label>
-        <label>最大件数（投稿のみ）<input name="max" inputmode="numeric" placeholder="空欄なら設定の値"></label>
+        <label>最大件数（投稿のみ）<input name="max" inputmode="numeric" placeholder="空欄なら設定の値（最大500件）"></label>
       </div>
       <p class="muted">「新しい投稿」は、前回集めた分より新しいものだけを保存します。</p>
       <div class="actions end"><button class="btn primary" type="submit">集める</button></div>
@@ -110,8 +110,8 @@
     <form class="card" data-task="related">
       <label>投稿のURL<input name="url" placeholder="https://x.com/…/status/…"></label>
       <div class="grid2">
-        <label>上位何件<input name="top" inputmode="numeric" placeholder="10"></label>
-        <label>最大収集件数（任意）<input name="max" inputmode="numeric" placeholder="指定なし"></label>
+        <label>上位何件<input name="top" inputmode="numeric" placeholder="10（最大100）"></label>
+        <label>最大収集件数（任意）<input name="max" inputmode="numeric" placeholder="指定なし（最大500件）"></label>
       </div>
       <div class="actions end"><button class="btn primary" type="submit">集めてランキングを作る</button></div>
     </form>

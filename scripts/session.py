@@ -62,8 +62,26 @@ class CdpConnectionError(RuntimeError):
 def load_config(path: str | Path = "config.yaml") -> dict:
     """config.yamlを読み込んで辞書として返す。"""
     path = Path(path)
+    ensure_config(path)
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+CONFIG_EXAMPLE_NAME = "config.example.yaml"
+
+
+def ensure_config(path: str | Path = "config.yaml") -> bool:
+    """config.yamlが無く、同じ場所にひな形(config.example.yaml)があればコピーして作る。作ったらTrue。
+
+    config.yamlは監視アカウント等を含むためリポジトリでは追跡しない(.gitignore)。既にあれば何もしない。
+    """
+    path = Path(path)
+    example = path.with_name(CONFIG_EXAMPLE_NAME)
+    if path.exists() or path.name != "config.yaml" or not example.exists():
+        return False
+    path.write_bytes(example.read_bytes())
+    logger.info("config.yamlが無いため、%sをコピーして作りました", example.name)
+    return True
 
 
 def resolve_cdp_url(cli_value: Optional[str], section: Optional[dict]) -> Optional[str]:

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -148,7 +149,8 @@ def find_video_tab(pages, video_id: str):
             url = page.url
         except Exception:
             continue
-        if f"/video/{video_id}" in url or f"/photo/{video_id}" in url:
+        # IDは完全一致で比べる(前方一致だと 123 を探して 1234 のタブを選んでしまう)
+        if re.search(rf"/(?:video|photo)/{re.escape(str(video_id))}(?!\d)", url):
             return page
     return None
 

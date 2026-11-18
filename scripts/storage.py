@@ -7,6 +7,7 @@ JSONL形式での生データ書き込み・読み込み、および state/ 配�
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -65,8 +66,13 @@ def filter_unseen(records: Iterable[dict], seen_ids: set[str], id_key: str = "id
     return [r for r in records if r.get(id_key) not in seen_ids]
 
 
+_UNSAFE_ACCOUNT_RE = re.compile(r"[^0-9A-Za-z_.-]")
+
+
 def _last_id_path(state_dir: str | Path, account: str) -> Path:
-    return Path(state_dir) / f"{account}_last_id.json"
+    # アカウント名はそのままファイル名になる。区切り文字などを落とし、state_dirの外に書かないようにする
+    safe = _UNSAFE_ACCOUNT_RE.sub("_", str(account)).lstrip(".") or "unknown"
+    return Path(state_dir) / f"{safe}_last_id.json"
 
 
 def load_last_id(state_dir: str | Path, account: str) -> Optional[str]:

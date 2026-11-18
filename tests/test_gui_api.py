@@ -64,11 +64,11 @@ class FakeDialogs:
         return self.save_result
 
 
-def make_api(tmp_path, popen=None, dialogs=None, alive=False):
+def make_api(tmp_path, popen=None, dialogs=None, alive=False, **kwargs):
     (tmp_path / "config.yaml").write_text(CONFIG, encoding="utf-8")
     opened = []
     api = gui_api.Api(root=tmp_path, dialogs=dialogs, popen=popen or FakePopen(),
-                      opener=opened.append, cdp_check=lambda: alive)
+                      opener=opened.append, cdp_check=lambda: alive, **kwargs)
     return api, opened
 
 
@@ -100,7 +100,7 @@ def test_run_builds_command_and_collects_output(tmp_path):
     assert res == {"ok": True, "title": "Xを検索"}
     cmd, kwargs = popen.calls[0]
     assert Path(cmd[2]).name == "search.py"
-    assert cmd[3:] == ["--query", "新作", "--mode", "top", "--max", "20"]
+    assert cmd[3:] == ["--query=新作", "--mode", "top", "--max", "20"]
     assert kwargs["cwd"] == tmp_path and kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
     done = wait_done(api)
     assert done["code"] == 0 and done["status"] == "完了しました"
@@ -246,3 +246,72 @@ def test_no_public_attributes_besides_methods(tmp_path):
     public = [k for k in vars(api) if not k.startswith("_")]
     assert public == []
     assert isinstance(subprocess.PIPE, int)
+
+
+def test_untrusted_output_lines_are_ignored(tmp_path):
+    # 投稿本文など他人が書いた文字列が「出力:」「保存先:」に見せかけても、出力先フォルダの外は覚えない
+    popen = FakePopen([
+        "出力: \\\\example.invalid\\share\\a.lnk",
+        "保存先: \\\\example.invalid\\share\\a.jsonl",
+        "出力: C:\\Windows\\System32\\calc.exe",
+        "上位Markdown: ../outside.md",
+        "  出力: digest/indented.md",
+        "保存先: data/raw/fx_20260101_001.jsonl",
+    ])
+    api, opened = make_api(tmp_path, popen=popen)
+    api.run("fx", {"urls": "https://x.com/example_a/status/1234567890"})
+    done = wait_done(api)
+    assert done["outputs"] == ["data/raw/fx_20260101_001.jsonl"]
+    assert done["last_files"] == [str(tmp_path / "data/raw/fx_20260101_001.jsonl")]
+
+
+def test_open_path_only_inside_output_dirs(tmp_path):
+    api, opened = make_api(tmp_path)
+    (tmp_path / "digest").mkdir()
+    (tmp_path / "digest" / "a.md").write_text("x", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "digest" / "a.exe").write_text("x", encoding="utf-8")
+    assert api.open_path("digest/a.md")["ok"] is True
+    for bad in ("secret.txt", "config.yaml", "digest/../secret.txt", "digest/a.exe", str(tmp_path / "secret.txt"),
+                "\\\\example.invalid\\share\\a.md"):
+        res = api.open_path(bad)
+        assert res["ok"] is False and "外" in res["error"], bad
+    assert opened == [tmp_path / "digest" / "a.md"]
+    assert api.open_folder("digest")["ok"] is True
+
+
+def test_cooldown_after_rate_limit(tmp_path):
+    now = [1000.0]
+    popen = FakePopen(["エラー: x"], code=3)
+    api, _ = make_api(tmp_path, popen=popen, clock=lambda: now[0])
+    api.run("search", {"query": "a"})
+    wait_done(api)
+    # 止められた直後は、SNSを開く収集はどれも実行できない
+    for task, params in (("search", {"query": "a"}), ("account", {}),
+                         ("related", {"url": "https://x.com/example_a/status/1"})):
+        res = api.run(task, params)
+        assert res["ok"] is False and "30分" in res["error"], task
+    assert len(popen.calls) == 1
+    # まとめ作成などSNSに触れない操作は止めない
+    assert api.run("digest", {"files": ["a.jsonl"]})["ok"] is True
+    wait_done(api)
+    now[0] += gui_api.COOLDOWN_SECONDS - 61
+    assert "2分" in api.run("search", {"query": "a"})["error"]
+    now[0] += 61
+    popen.code = 0
+    assert api.run("search", {"query": "a"})["ok"] is True
+
+
+def test_no_cooldown_after_normal_exit(tmp_path):
+    popen = FakePopen(["エラー: x"], code=1)
+    api, _ = make_api(tmp_path, popen=popen)
+    api.run("search", {"query": "a"})
+    wait_done(api)
+    assert api.run("search", {"query": "a"})["ok"] is True
+
+
+def test_save_settings_rejects_odd_account(tmp_path):
+    api, _ = make_api(tmp_path)
+    res = api.save_settings({"accounts": {"x": "../../x"}, "keywords": "", "use_cdp": False, "browser": "chromium"})
+    assert res["ok"] is False and "アカウント名" in res["error"]
+    assert (tmp_path / "config.yaml").read_text(encoding="utf-8") == CONFIG

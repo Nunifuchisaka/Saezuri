@@ -90,12 +90,20 @@ def script_command(python: str, scripts_dir: Path | str, script: str, args: Iter
     return [python, "-u", str(Path(scripts_dir) / script), *args]
 
 
-def _parse_positive_int(value: str, label: str) -> Optional[str]:
+# 画面から指定できる件数の上限。大量に集めるほどSNS側に止められやすい（アカウント凍結リスク）ため、
+# 画面からは控えめな件数しか受け付けない。これを超える収集はコマンドラインから自己責任で行う。
+MAX_ITEMS_LIMIT = 500
+TOP_LIMIT = 100
+
+
+def _parse_positive_int(value: str, label: str, limit: Optional[int] = None) -> Optional[str]:
     value = (value or "").strip()
     if not value:
         return None
-    if not value.isdigit() or int(value) <= 0:
+    if not value.isascii() or not value.isdigit() or int(value) <= 0:
         raise InputError(f"{label}は1以上の数字で入力してください。")
+    if limit is not None and int(value) > limit:
+        raise InputError(f"{label}は{limit}以下にしてください（集めすぎるとSNS側に止められやすくなります）。")
     return str(int(value))
 
 
@@ -111,6 +119,9 @@ def _parse_date(value: str, label: str) -> Optional[str]:
     return value
 
 
+_ACCOUNT_RE = re.compile(r"^[0-9A-Za-z_][0-9A-Za-z_.]{0,63}$")
+
+
 def normalize_account(value: str) -> str:
     """'@foo' や 'https://x.com/foo' のような入力からアカウント名だけを取り出す。"""
     value = (value or "").strip()
@@ -119,7 +130,10 @@ def normalize_account(value: str) -> str:
     if value.startswith("http://") or value.startswith("https://"):
         path = urlparse(value).path.strip("/")
         value = path.split("/")[0] if path else ""
-    return value.lstrip("@").strip()
+    value = value.lstrip("@").strip()
+    if value and not _ACCOUNT_RE.match(value):
+        raise InputError(f"アカウント名として読めません: {value[:40]}")
+    return value
 
 
 def build_search_args(query: str, from_handle: str = "", since: str = "", until: str = "",
@@ -131,9 +145,9 @@ def build_search_args(query: str, from_handle: str = "", since: str = "", until:
         raise InputError("キーワードか投稿者のどちらかを入力してください。")
     args: list[str] = []
     if query:
-        args += ["--query", query]
+        args.append(f"--query={query}")
     if handle:
-        args += ["--from", handle]
+        args.append(f"--from={handle}")
     since_v = _parse_date(since, "開始日")
     until_v = _parse_date(until, "終了日")
     if since_v and until_v and since_v > until_v:
@@ -145,7 +159,7 @@ def build_search_args(query: str, from_handle: str = "", since: str = "", until:
     if mode not in ("live", "top"):
         raise InputError("並び順の指定が不正です。")
     args += ["--mode", mode]
-    max_v = _parse_positive_int(max_items, "最大件数")
+    max_v = _parse_positive_int(max_items, "最大件数", MAX_ITEMS_LIMIT)
     if max_v:
         args += ["--max", max_v]
     return args
@@ -161,9 +175,9 @@ def build_account_command(sns: str, kind: str, account: str = "", max_items: str
     args: list[str] = []
     name = normalize_account(account)
     if name:
-        args += [account_flag, name]
+        args.append(f"{account_flag}={name}")
     if accepts_max:
-        max_v = _parse_positive_int(max_items, "最大件数")
+        max_v = _parse_positive_int(max_items, "最大件数", MAX_ITEMS_LIMIT)
         if max_v:
             args += ["--max", max_v]
     return script, args
@@ -194,11 +208,11 @@ def build_related_command(url: str, top: str = "", max_items: str = "") -> tuple
         raise InputError("X・Instagram・Threads・TikTokの投稿URLを入力してください。")
     if sns not in RELATED_SCRIPTS:
         raise InputError("この投稿の反応ランキングには対応していません。")
-    args = ["--url", url]
-    top_v = _parse_positive_int(top, "上位件数")
+    args = [f"--url={url}"]
+    top_v = _parse_positive_int(top, "上位件数", TOP_LIMIT)
     if top_v:
         args += ["--top", top_v]
-    max_v = _parse_positive_int(max_items, "最大件数")
+    max_v = _parse_positive_int(max_items, "最大件数", MAX_ITEMS_LIMIT)
     if max_v:
         args += ["--max", max_v]
     return RELATED_SCRIPTS[sns], args
@@ -211,7 +225,7 @@ def build_digest_args(files: Iterable[str], title: str = "") -> list[str]:
     args = list(files)
     title = (title or "").strip()
     if title:
-        args += ["--title", title]
+        args.append(f"--title={title}")
     return args
 
 
@@ -342,6 +356,19 @@ def cdp_enabled(config: dict) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+CONFIG_EXAMPLE_NAME = "config.example.yaml"
+
+
+def ensure_config(root: Path | str) -> bool:
+    """config.yamlが無く、ひな形(config.example.yaml)があればコピーして作る。作ったらTrue。"""
+    path = Path(root) / "config.yaml"
+    example = Path(root) / CONFIG_EXAMPLE_NAME
+    if path.exists() or not example.exists():
+        return False
+    path.write_bytes(example.read_bytes())
+    return True
+
+
 # ---- ログイン用Chrome ----
 
 def chrome_candidates(platform: str = sys.platform, env: Optional[dict] = None) -> list[str]:
@@ -376,13 +403,55 @@ OUTPUT_PREFIXES = ("保存先:", "上位Markdown:", "出力:")
 
 
 def extract_output_path(line: str) -> Optional[str]:
-    """スクリプトの標準出力1行から出力先パスを取り出す（`保存先: data/raw/x.jsonl` 等）。"""
-    text = (line or "").strip()
+    """スクリプトの標準出力1行から出力先パスを取り出す（`保存先: data/raw/x.jsonl` 等）。
+
+    行頭（字下げなし）が決まった見出しで始まる行だけを対象にする。標準出力には他人の投稿本文など
+    信用できない文字列も流れるので、ここで拾った値は必ず is_allowed_output で確かめてから使うこと。
+    """
+    text = (line or "").rstrip()
     for prefix in OUTPUT_PREFIXES:
         if text.startswith(prefix):
             path = text[len(prefix):].strip()
             return path or None
     return None
+
+
+OPENABLE_SUFFIXES = (".jsonl", ".md", ".csv")
+DEFAULT_OUTPUT_DIRS = {"raw_dir": "data/raw", "digest_dir": "digest", "media_dir": "data/media"}
+
+
+def output_dirs(config: dict, root: Path | str) -> list[str]:
+    """収集結果の出力先フォルダ（config.yamlのoutput.*）を絶対パスで返す。"""
+    output = config.get("output") if isinstance(config.get("output"), dict) else {}
+    dirs = []
+    for key, default in DEFAULT_OUTPUT_DIRS.items():
+        value = output.get(key)
+        value = value if isinstance(value, str) and value.strip() else default
+        dirs.append(os.path.abspath(os.path.join(str(root), value)))
+    return dirs
+
+
+def is_allowed_output(path: str, root: Path | str, allowed_dirs: Iterable[str]) -> bool:
+    """`path`が出力先フォルダそのもの、またはその中の想定した種類のファイル・フォルダかどうか。
+
+    ファイルやネットワークには一切触れず、文字列だけで判定する（`\\\\server\\share`のようなパスは、
+    存在を確かめるだけでも外部のサーバーへ接続しに行ってしまうため）。
+    """
+    if not isinstance(path, str) or not path.strip() or "\x00" in path:
+        return False
+    target = os.path.normcase(os.path.abspath(os.path.join(str(root), path.strip())))
+    for base in allowed_dirs:
+        base = os.path.normcase(os.path.abspath(base))
+        if target == base:
+            return True
+        try:
+            inside = os.path.commonpath([target, base]) == base
+        except ValueError:  # ドライブが違う等
+            inside = False
+        if inside:
+            suffix = os.path.splitext(target)[1].lower()
+            return suffix == "" or suffix in OPENABLE_SUFFIXES
+    return False
 
 
 # ---- JSONL → Excel用CSV ----
@@ -473,6 +542,20 @@ def read_jsonl_records(paths: Iterable[str | Path]) -> list[dict]:
     return out
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def csv_safe(value: str) -> str:
+    """Excelが数式として実行しうるセル（= + - @ などで始まる）を、先頭に ' を付けて文字として扱わせる。
+
+    本文や表示名は他人が自由に書ける文字列なので、そのまま書くと「CSVを開いただけで式が動く」
+    （CSVインジェクション）ことがある。
+    """
+    if isinstance(value, str) and value.lstrip(" ").startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def write_csv(paths: Iterable[str | Path], out_path: str | Path) -> int:
     """JSONLをExcelでそのまま開けるCSV（UTF-8 BOM付き）にする。書いた行数を返す。"""
     import csv
@@ -484,8 +567,8 @@ def write_csv(paths: Iterable[str | Path], out_path: str | Path) -> int:
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(headers)
-        writer.writerows(rows)
+        writer.writerow([csv_safe(h) for h in headers])
+        writer.writerows([csv_safe(c) for c in row] for row in rows)
     return len(rows)
 
 

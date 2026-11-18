@@ -50,6 +50,7 @@ STATUS_URL_RE = re.compile(
     r"^https?://(?:www\.|mobile\.)?(?:x|twitter|fxtwitter|fixupx|vxtwitter)\.com/(?:[^/?#]+|i(?:/web)?)/status(?:es)?/(\d{2,20})",
     re.IGNORECASE)
 ID_RE = re.compile(r"^\d{2,20}$")
+HANDLE_RE = re.compile(r"^[0-9A-Za-z_]{1,30}$")
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -107,7 +108,7 @@ def parse_fx_status(status: dict, collected_at: str, source_query: str = SOURCE_
     author = status.get("author") if isinstance(status.get("author"), dict) else {}
     handle = _str(author.get("screen_name"))
     text = _str(status.get("text"))
-    if not post_id or not ID_RE.match(post_id) or not handle or text is None:
+    if not post_id or not ID_RE.match(post_id) or not handle or not HANDLE_RE.match(handle) or text is None:
         logger.warning("FxTwitterの応答に必要な項目がありません(id/author.screen_name/text)。スキップします")
         return None
     replying = status.get("replying_to") if isinstance(status.get("replying_to"), dict) else {}
@@ -213,12 +214,13 @@ def _raw_dir(config_path: str) -> Path:
 
 
 def _print_post(post: Post, views: Optional[int]) -> None:
-    head = post.text.replace("\n", " ")
+    head = " ".join(post.text.split())
     head = head[:60] + ("…" if len(head) > 60 else "")
     views_text = f" / 表示 {views:,}" if views is not None else ""
     print(f"@{post.author_handle}: いいね {post.like_count:,} / リポスト {post.repost_count:,} / "
           f"返信 {post.reply_count:,} / 引用 {post.quote_count:,}{views_text}")
-    print(f"  {head}")
+    # 本文は他人が自由に書ける文字列。行頭に置くと「保存先:」等の見出しに見せかけられるので必ず字下げして出す
+    print(f"  本文: {head}")
     print(f"  {post.url}")
 
 

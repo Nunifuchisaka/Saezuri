@@ -63,6 +63,10 @@ def main() -> int:
         _alert("画面の部品（pywebview）が入っていません。saezuriのフォルダの setup.bat をダブルクリックしてから、"
                "もう一度起動してください。")
         return 1
+    try:
+        gui_api.g.ensure_config(gui_api.ROOT)  # 初回は config.example.yaml から作る
+    except OSError:
+        pass
     if not (gui_api.ROOT / "config.yaml").exists():
         _alert(f"設定ファイルが見つかりません: {gui_api.ROOT / 'config.yaml'}")
         return 1

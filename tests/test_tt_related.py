@@ -89,3 +89,14 @@ def test_wait_for_video_tab_pumps_playwright_events():
     found = tt_related.wait_for_video_tab(ctx, VIDEO_ID, timeout_s=30, poll_s=0.01)
     assert found is ctx.pages[1]
     assert ctx.pages[0].waits == 2
+
+
+def test_find_video_tab_matches_whole_id():
+    class P:
+        def __init__(self, url):
+            self.url = url
+
+    longer = P("https://www.tiktok.com/@example_t/video/12345")
+    exact = P("https://www.tiktok.com/@example_t/video/1234?lang=ja")
+    assert tt_related.find_video_tab([longer], "1234") is None
+    assert tt_related.find_video_tab([longer, exact], "1234") is exact

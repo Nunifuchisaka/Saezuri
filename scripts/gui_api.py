@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Protocol
@@ -30,6 +31,14 @@ SHORT_STATUS = {
     3: "アクセス過多のため止めました",
     4: "確認画面が出たため止めました",
 }
+
+# SNS側に止められた（終了コード3・4）あと、同じ種類の収集を画面から再実行できるようになるまでの秒数。
+# すぐ繰り返すとアカウントを凍結されやすいため、案内文だけに頼らず画面側でも待たせる。
+# 画面を開き直すと消える簡易な歯止めで、コマンドラインからの実行は止めない。
+COOLDOWN_SECONDS = 30 * 60
+COOLDOWN_CODES = (3, 4)
+# 同じ歯止めを共有する操作のまとまり（ブラウザでSNSを開く収集はまとめて待たせる）
+COOLDOWN_GROUPS = {"search": "sns", "account": "sns", "related": "sns", "fx": "fx", "media": "media"}
 
 BROWSER_CHOICES = [
     {"value": "chromium", "label": "標準（追加インストール不要・おすすめ）"},
@@ -95,14 +104,18 @@ def cdp_alive(url: str = g.DEFAULT_CDP_URL, timeout: float = 0.5) -> bool:
 class Job:
     """実行中（または直前）のスクリプト1本。出力は行のリストに溜め、画面が差分を取りに来る。"""
 
-    def __init__(self, title: str, proc: subprocess.Popen):
+    def __init__(self, title: str, proc: subprocess.Popen,
+                 accept: Callable[[str], bool] = lambda path: True, task: str = ""):
         self.title = title
+        self.task = task
         self.proc = proc
+        self._accept = accept
         self.lines: list[str] = []
         self.outputs: list[str] = []
         self.code: Optional[int] = None
         self.done = False
         self.stopped = False
+        self.counted = False
         self.started_at = datetime.now()
         self._lock = threading.Lock()
         threading.Thread(target=self._read, daemon=True).start()
@@ -114,7 +127,8 @@ class Job:
             with self._lock:
                 self.lines.append(line)
                 path = g.extract_output_path(line)
-                if path:
+                # 標準出力には他人の投稿本文も流れる。出力先フォルダの中だと確かめられたものだけ覚える
+                if path and self._accept(path):
                     self.outputs.append(path)
         code = self.proc.wait()
         with self._lock:
@@ -138,7 +152,8 @@ class Api:
     def __init__(self, root: Path = ROOT, dialogs: Optional[Dialogs] = None,
                  popen: Callable[..., subprocess.Popen] = subprocess.Popen,
                  opener: Callable[[Path], None] = open_in_os,
-                 cdp_check: Callable[[], bool] = cdp_alive):
+                 cdp_check: Callable[[], bool] = cdp_alive,
+                 clock: Callable[[], float] = time.monotonic):
         self._root = Path(root)
         self._dialogs = dialogs
         self._popen = popen
@@ -146,6 +161,8 @@ class Api:
         self._cdp_check = cdp_check
         self._job: Optional[Job] = None
         self._last_jsonl: list[str] = []
+        self._clock = clock
+        self._cooldown_until: dict[str, float] = {}
 
     # pywebviewはアンダースコアで始まらない属性を画面に公開するため、内部用は_付きにする
 
@@ -166,6 +183,21 @@ class Api:
 
     def _running(self) -> bool:
         return self._job is not None and not self._job.done
+
+    def _is_allowed_output(self, path: str) -> bool:
+        return g.is_allowed_output(path, self._root, g.output_dirs(self._load_config(), self._root))
+
+    def _cooldown_minutes(self, task: str) -> int:
+        """この操作をあと何分待つ必要があるか（待たなくてよければ0）。"""
+        group = COOLDOWN_GROUPS.get(task)
+        remaining = self._cooldown_until.get(group, 0.0) - self._clock() if group else 0.0
+        return max(0, int(-(-remaining // 60)))
+
+    def _note_result(self, job: Job) -> None:
+        group = COOLDOWN_GROUPS.get(job.task)
+        if group and job.code in COOLDOWN_CODES:
+            self._cooldown_until[group] = max(self._cooldown_until.get(group, 0.0),
+                                              self._clock() + COOLDOWN_SECONDS)
 
     # ---- 状態 ----
 
@@ -197,6 +229,10 @@ class Api:
             return {"ok": False, "error": "実行中の処理があります。終わってから実行してください。"}
         if task not in TASKS:
             return {"ok": False, "error": "不明な操作です。"}
+        wait = self._cooldown_minutes(task)
+        if wait:
+            return {"ok": False, "error": f"SNS側に止められた直後のため、あと約{wait}分は実行できません。"
+                                          "すぐに繰り返すとアカウントを凍結されやすくなります。時間をあけてください。"}
         title, build = TASKS[task]
         try:
             script, args = build(params or {})
@@ -215,7 +251,7 @@ class Api:
                                errors="replace", bufsize=1, **kwargs)
         except OSError as exc:
             return {"ok": False, "error": f"起動できませんでした: {exc}"}
-        self._job = Job(title, proc)
+        self._job = Job(title, proc, accept=self._is_allowed_output, task=task)
         return {"ok": True, "title": title}
 
     def poll(self, since: int = 0) -> dict:
@@ -223,6 +259,9 @@ class Api:
             return {"ok": True, "idle": True}
         snap = self._job.snapshot(int(since or 0))
         if snap["done"]:
+            if not self._job.counted:
+                self._job.counted = True
+                self._note_result(self._job)
             snap["message"] = g.exit_message(snap["code"])
             snap["status"] = SHORT_STATUS.get(snap["code"], f"エラーで止まりました（終了コード{snap['code']}）")
             jsonl = [str(self._abs(p)) for p in snap["outputs"] if p.endswith(".jsonl")]
@@ -242,6 +281,9 @@ class Api:
     # ---- ファイル ----
 
     def open_path(self, path: str) -> dict:
+        # 画面から渡されたパスは、出力先フォルダの中だと確かめてから開く（存在確認より先に行う）
+        if not self._is_allowed_output(path):
+            return {"ok": False, "error": "収集結果のフォルダの外にあるため開けません。"}
         target = self._abs(path)
         if not target.exists():
             return {"ok": False, "error": f"まだありません: {target}"}
@@ -314,8 +356,11 @@ class Api:
         if self._running():
             return {"ok": False, "error": "実行中は設定を保存できません。終わってから保存してください。"}
         settings = settings or {}
-        accounts = {sns: g.parse_account_lines(settings.get("accounts", {}).get(sns, ""))
-                    for sns in g.SNS_LABELS}
+        try:
+            accounts = {sns: g.parse_account_lines((settings.get("accounts") or {}).get(sns, ""))
+                        for sns in g.SNS_LABELS}
+        except g.InputError as exc:
+            return {"ok": False, "error": str(exc)}
         keywords = g.parse_lines(settings.get("keywords", ""))
         use_cdp = bool(settings.get("use_cdp"))
         browser = settings.get("browser") or "chromium"

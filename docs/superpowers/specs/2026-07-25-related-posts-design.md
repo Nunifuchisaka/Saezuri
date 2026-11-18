@@ -1,7 +1,7 @@
 # related.py 設計書：ひとつのPostから関連Postを収集する
 
 - 日付: 2026-07-25
-- 対象: saezuri（`E:\git\Saezuri`）
+- 対象: saezuri
 - 新規: `scripts/related.py`
 - 変更: `scripts/capture.py`（`TweetDetail` オペレーション追加）
 

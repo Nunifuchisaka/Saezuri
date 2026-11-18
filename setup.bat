@@ -20,6 +20,9 @@ if not exist ".venv\Scripts\python.exe" (
   py -3 -m venv .venv
   if errorlevel 1 goto fail
 )
+if not exist "config.yaml" (
+  if exist "config.example.yaml" copy /y "config.example.yaml" "config.yaml" >nul
+)
 echo [2/3] 必要な部品をインストールしています（数分かかります）...
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r requirements.txt
 if errorlevel 1 goto fail

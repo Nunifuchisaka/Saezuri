@@ -151,6 +151,8 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 
 画面は`scripts/webui/`（`index.html`/`app.css`/`app.js`。外部CDNは使わずオフラインで完結）、ウィンドウは`pywebview`（WindowsはEdge WebView2）。`gui.py`は起動だけ（pywebviewが無ければメッセージを出して終了、ファイルダイアログを`WebviewDialogs`で`gui_api`に渡す、閉じるときに実行中のスクリプトを止める）。収集ロジックは持たず、既存スクリプトを`subprocess`で1本ずつ呼ぶだけ（実行中は次を受け付けない＝同時収集しない）。デザインは「案A ミント」（左メニュー＋カード、ライト/ダーク両対応）。
 - `gui_api.py`の`Api`がjs_api。画面からの呼び出しは全て`{"ok": bool, ...}`を返し例外を投げない。`run(task, params)`→`poll(since)`で出力行を差分取得し、`保存先:`/`上位Markdown:`/`出力:`の行から出力パスを拾い、終了コードを日本語の案内（`SHORT_STATUS`と`gui_support.exit_message`）にする。pywebviewは公開属性を画面に出すので、内部状態は全て`_`付きにする。テストは`tests/test_gui_api.py`（Popen・ダイアログ・オープナーを差し替え）。
+- **信用しない入力の扱い**：子プロセスの標準出力には他人の投稿本文が流れる。出力パスは、字下げなしで見出し（`保存先:`等）から始まる行だけを`extract_output_path`で拾い、`is_allowed_output`（出力先フォルダ`output.raw_dir`/`digest_dir`/`media_dir`の中で、拡張子が`.jsonl`/`.md`/`.csv`か拡張子なし。ファイルやネットワークに触れず文字列だけで判定する）を通ったものだけ`Job.outputs`に入れる。`Api.open_path`も同じ判定を存在確認より先に行う。スクリプト側で他人の文字列を表示するときは、必ず字下げするか接頭辞を付けて行頭に置かない（`fx_tweet._print_post`）。CSVは`csv_safe`で`=`/`+`/`-`/`@`始まりのセルに`'`を付ける。引数は`--flag=value`の1引数で渡し（`-`始まりの値がオプションと誤認されないように）、アカウント名は`normalize_account`で文字種を検証する。
+- **凍結リスクの歯止め**：画面からの件数は`MAX_ITEMS_LIMIT`（500）・`TOP_LIMIT`（100）まで。終了コード3・4で終わったら、`gui_api.COOLDOWN_SECONDS`（30分）の間は同じまとまり（`COOLDOWN_GROUPS`。検索・アカウント追跡・反応ランキングは共通）の実行を断る。メモリ上だけの歯止めで、定期実行・自動リトライにはしない。
 - `gui_support.py`はpywebview・Playwright非依存の純関数（引数組み立て`build_*`、`exit_message`、JSONL→Excel用CSV（UTF-8 BOM付き）`write_csv`、`config.yaml`のコメントを残したままの書き換え`set_config_value`/`set_watch_accounts`/`set_interest_keywords`/`set_cdp_urls`、ログイン状況`login_status`、ログイン用Chromeの探索と起動コマンド）。テストは`tests/test_gui_support.py`。
 - 「ログイン用Chromeを開く」は`chrome-profile/`（.gitignore済み）を専用プロファイルにして`--remote-debugging-port=9222`で起動し、CDP設定が無ければ有効にする。X・TikTokはこのChromeにCDP接続して収集する（設定画面の切替は`session.cdp_url`と`tiktok.cdp_url`を同時に変える）。ログイン状況はCDP方式ならChromeの起動有無（`/json/version`）、それ以外はstorage_stateファイルの有無で表示する。自動ログインはしない。
 - 設定画面の保存は`config.yaml`を行単位で書き換え（前の内容を`config.yaml.bak`に退避、YAMLとして読めない結果は書かない）。
@@ -176,6 +178,8 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 - 終了コードは`0`=正常 / `1`=設定・環境エラー / `3`=レートリミット（429）検知。429検知時は即中断し、そこまでの保存分は残す（リトライしない）。
 
 ## 設定ファイル（`config.yaml`）
+
+リポジトリにあるのはひな形の`config.example.yaml`だけで、`config.yaml`は追跡しない（監視アカウント等の混入防止。`.gitignore`）。無ければ`session.ensure_config`（`load_config`から呼ぶ）・`gui_support.ensure_config`（`gui.py`）・`setup.bat`がひな形からコピーする。設定項目を増やすときは`config.example.yaml`に足す。ひな形には実在のアカウント名や管理人の環境の値を入れない（`tests/test_gui_support.py`の`test_config_example_is_neutral`で確認）。収集データ（`data/`・`digest/`・`*.csv`）とログイン結果（`session/`）もコミットしない。
 
 `watch_accounts`（追跡ハンドル）、`interest_keywords`（トレンド絞り込み・タグ付け用）、`max_items`、`wait_seconds.min/max`（スクロール間ランダム待機）、`output.raw_dir`/`state_dir`/`digest_dir`/`media_dir`、`session.storage_state_path`、`instagram.watch_accounts`/`instagram.storage_state_path`（Instagram収集用）、`threads.watch_accounts`/`threads.storage_state_path`（Threads収集用）、`tiktok.watch_accounts`/`tiktok.storage_state_path`（TikTok収集用）、`browser`（既定chromium、不正値はchromiumにフォールバック＋警告）、`browser_executable_path`（brave使用時のみ）。全てプロジェクトルート相対パス（`browser_executable_path`のみ絶対パス）。
 

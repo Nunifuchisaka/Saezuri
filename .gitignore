@@ -1,6 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
+# 設定（監視アカウント等を含む。config.example.yaml をコピーして作る）
+config.yaml
+# ログイン結果（Cookie）
+session/
+*storage_state*.json
 x_storage_state.json
 instagram_storage_state.json
 threads_storage_state.json
@@ -8,6 +13,9 @@ tiktok_storage_state.json
 seen_ids.json
 *_last_id.json
 *.jsonl
+*.csv
+# 収集データ（第三者の投稿・個人情報を含む）
+data/
 state/
 digest/
 data/media/

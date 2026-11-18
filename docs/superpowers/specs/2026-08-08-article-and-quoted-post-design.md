@@ -1,7 +1,7 @@
 # tweet.py 拡張設計書：X Article対応 と 引用元投稿の自動取得
 
 - 日付: 2026-08-08
-- 対象: saezuri（`E:\git\Saezuri`）
+- 対象: saezuri
 - 変更: `scripts/tweet.py`、`scripts/capture.py`（引用元パース追加）
 - 新規: `scripts/article.py`（実装時のGraphQLオペレーション調査結果次第で、`tweet.py`への分岐追加に代える可能性あり）
 

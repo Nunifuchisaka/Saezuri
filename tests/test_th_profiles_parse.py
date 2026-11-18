@@ -61,7 +61,7 @@ def test_数値にできないテキストはNone(text):
 
 
 def test_ページ文中からフォロワー表記を抜き出せる():
-    assert find_follower_text("CEZANNEの公式\nフォロワー4.3万人\nフォローする") == "4.3万"
+    assert find_follower_text("サンプルブランドの公式\nフォロワー4.3万人\nフォローする") == "4.3万"
     assert find_follower_text("フォロワー1,234人") == "1,234"
     assert find_follower_text("フォロワー500人") == "500"
     assert find_follower_text("43.7K followers") == "43.7K"
@@ -122,14 +122,14 @@ def test_任意項目が欠けていても落ちない():
 
 
 def test_表示テキストからは概数として組み立てる():
-    text = "セザンヌ化粧品　公式\ncezannecosmetics\nフォロワー4.3万人\nフォローする"
-    profile = build_profile_from_text("cezannecosmetics", text, collected_at=COLLECTED_AT)
+    text = "サンプルブランド　公式\nexample_brand\nフォロワー4.3万人\nフォローする"
+    profile = build_profile_from_text("example_brand", text, collected_at=COLLECTED_AT)
     assert profile is not None
     assert profile.followers_count == 43000
     assert profile.followers_is_approx is True
     assert profile.followers_source == "page_text"
-    assert profile.handle == "cezannecosmetics"
-    assert profile.profile_url == "https://www.threads.com/@cezannecosmetics"
+    assert profile.handle == "example_brand"
+    assert profile.profile_url == "https://www.threads.com/@example_brand"
 
 
 def test_表示テキストにフォロワー表記が無ければNone():

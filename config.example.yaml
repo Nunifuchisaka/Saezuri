@@ -1,12 +1,16 @@
-# saezuri 設定ファイル
+# saezuri 設定ファイルのひな形
+#
+# このファイルを config.yaml という名前でコピーして使う（setup.bat・GUI・各スクリプトは、config.yaml が
+# 無ければ自動でコピーする）。config.yaml は追跡対象外（.gitignore）なので、監視アカウント等を書いても
+# リポジトリには入らない。
 
 # 監視対象アカウント（追跡対象のXハンドル名、@は付けない）
 # 例: watch_accounts: ["some_account", "another_account"]
-watch_accounts: ["claudeai","ClaudeDevs","OpenAI","OpenAIDevs","thsottiaux"]
+watch_accounts: []
 
 # 関心キーワード（トレンド収集時のフィルタや台本・記事ネタ探しの目印として使う語）
 # 例: interest_keywords: ["VRChat", "VR"]
-interest_keywords: ["Claude","Codex","OpenAI","LLM","GPT","バイブコーディング"]
+interest_keywords: []
 
 # 1回の収集ジョブで取得する最大件数の目安
 max_items: 100
@@ -27,13 +31,14 @@ output:
 session:
   storage_state_path: session/x_storage_state.json  # 手動ログイン結果（storage_state）の保存先
   # 管理人が起動・ログイン済みのChromeにCDPで接続する場合の接続先(X側スクリプトの--cdp省略時の既定)。空ならstorage_state方式
-  cdp_url: http://127.0.0.1:9222
+  # 例: cdp_url: http://127.0.0.1:9222
+  cdp_url:
 
 # 起動するブラウザエンジン(chromium/firefox/webkit/brave)。不正値・省略時はchromiumにフォールバックする。
 # firefox/webkitを使う場合は事前に `playwright install firefox` / `playwright install webkit` が必要。
 # login.pyと収集スクリプト(search.py等)で異なるエンジンを使うとフィンガープリントが変わり
 # bot検知リスクが上がるため、同じ値を使うこと。
-browser: brave # chromium
+browser: chromium
 
 # Instagram収集(ig_login.py / ig_user_posts.py)用の設定。X用のセッションとは別ファイルで管理する。
 instagram:
