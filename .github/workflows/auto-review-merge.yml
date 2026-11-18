@@ -1,6 +1,7 @@
 # PRの自動レビュー＋自動マージ(呼び出し側)
 # 本体は Nunifuchisaka/Enchanter の .github/workflows/claude-review-reusable.yml。
-# このファイルは全リポジトリ共通で、同じ内容をそのまま置く。
+# 全リポジトリ共通の内容だが、このリポジトリは公開なので呼び出し先をコミットSHAで固定している。
+# Enchanter側を更新したら、下の uses: のSHAも更新すること。
 # 必要なシークレット: CLAUDE_CODE_OAUTH_TOKEN(または ANTHROPIC_API_KEY)
 
 name: Auto review & merge
@@ -25,7 +26,7 @@ permissions:
 
 jobs:
   auto-review:
-    uses: Nunifuchisaka/Enchanter/.github/workflows/claude-review-reusable.yml@main
+    uses: Nunifuchisaka/Enchanter/.github/workflows/claude-review-reusable.yml@dc31c3240e877e52de556e36f5efcbd84362df9b # main (2026-11-18時点)
     with:
       pr_number: ${{ format('{0}', github.event.pull_request.number || inputs.pr_number) }}
     secrets: inherit
