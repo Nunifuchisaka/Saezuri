@@ -41,6 +41,8 @@ python scripts/th_user_posts.py                                   # threads.watc
 python scripts/tt_login.py                                        # TikTokの初回・失効時の手動ログイン
 python scripts/tt_user_posts.py                                   # tiktok.watch_accounts全件の投稿追跡(CAPTCHA検知で即中断)
 python scripts/tt_profiles.py                                     # tiktok.watch_accounts全件のフォロワー数等プロフィール取得
+python scripts/fx_tweet.py --url https://x.com/foo/status/123    # ログイン不要で投稿1件ずつの本文・数値を取得(FxTwitter API)
+python scripts/gui.py                                             # 非エンジニア向けGUI（Windowsはstart_gui.batをダブルクリック。初回はsetup.bat）
 ```
 
 `tests/`配下にpytestの単体テストが存在する（Playwright非依存の純粋なパース・正規化ロジックが対象。例: `tests/test_capture_quoted.py`は`capture.py`の引用元投稿抽出ロジック、`tests/test_instagram_parse.py`・`tests/test_threads_parse.py`は`instagram.py`・`threads.py`の投稿正規化ロジックを検証する。`tests/test_tiktok_parse.py`・`test_tt_profiles_parse.py`・`test_tt_user_posts.py`は`tiktok.py`・`tt_profiles.py`・`tt_user_posts.py`の正規化・CAPTCHA検知ロジックを合成データで検証する。起点投稿のリプライ・引用・コメント上位抽出は`test_ranking.py`(ランキング・Markdown)・`test_related.py`・`test_related_scripts_meta.py`(各スクリプトの純関数)・`test_capture_reply_to.py`(Xの`in_reply_to_id`)・`test_instagram_comments.py`(IGコメント・shortcode変換)・`test_threads_related.py`(Threads返信・引用一覧)・`test_capture_scroll.py`(スクロールJS差し替え)で検証する。テストのfixtureは実データを使わず、ユーザー名・本文・ID・URLを架空値にした合成データにすること）。実行は `pytest tests/`。一方、Playwrightを使った実ブラウザ操作を伴う部分（収集本体のスクレイピングロジック）は引き続き自動テスト化されておらず、手動QAで確認する運用である。
@@ -74,6 +76,10 @@ URL/IDで指定した1件のツイートを`x.com/<handle>/status/<id>`（ハン
 対象ツイートが引用ツイートの場合、TweetDetailペイロードに同梱される`quoted_status_result.result`から引用元投稿も追加リクエストなしで正規化し(`capture.py`の`find_tweet_result`/`parse_quoted_post`)、同じJSONLへ2件目のレコード(`source_query`は`quoted-by:<起点投稿id>`)として保存する。この挙動は`tweet.py`のみが対象で、`parse_timeline_payload`を使う他の収集モジュール(`search.py`等)には影響しない。
 
 起点投稿・引用元投稿いずれかがX Articleへのリンクの場合、記事タイトル・本文も`Post.article_title`/`Post.article_text`として同時に保存・標準出力表示される。この解析自体は`capture.py`の`_parse_tweet_result`に組み込まれているため、`tweet.py`専用ではなく`search.py`等の収集モジュールで収集した投稿にも同様に適用される（引用元投稿の取得自体が`tweet.py`専用なのは変わらない）。標準出力の表示は`tweet.py`の`_print_post`ヘルパーに集約した（起点投稿・引用元投稿の表示コードの重複を解消）。
+
+### `scripts/fx_tweet.py`（ログイン不要の投稿取得・FxTwitter API）
+
+第三者の公開API FxTwitter（`https://api.fxtwitter.com/2/status/<id>`、FxEmbedプロジェクト、MIT）に`urllib.request`でGETするだけ（Playwright・ログイン・Cookie不使用、依存追加なし）。外部に出すのは投稿IDのみ、User-Agentは汎用名（リポジトリURLや個人情報を入れない）。応答は信用しないデータとして扱い（5MB上限、型チェック、`https://`以外のメディアURLは捨てる、IDは数字のみ）、想定外ならその投稿だけ警告してスキップ。`parse_fx_status`/`parse_fx_payload`で`Post`化（`likes`/`reposts`/`replies`/`quotes`→各count、`replying_to.status`→`in_reply_to_id`、`quote`→`quoted_id`＋引用元を2件目のPost、`article.title`/`preview_text`→`article_title`/`article_text`、`media.all`の`gif`は`animated_gif`）。`views`はスキーマに無いので表示のみ。複数指定は逐次・1〜3秒待機、429で即中断（取得済み保存・終了コード3）、自動リトライなし。テストは`tests/test_fx_tweet.py`（通信なし）。GUIの「投稿の数字を取る」（`gui_support.build_fx_args`、最大50件）から呼ぶ。
 
 ### `scripts/x_profiles.py`（アカウントのプロフィール・フォロワー数取得）
 
@@ -139,6 +145,15 @@ Instagram・Threadsと同じ方針・同じ終了コード契約。**実機未�
 - **`ig_related.py`（Instagram）**：投稿ページ`/p/<shortcode>/`を開き、ページ埋め込みJSON（目印`xdt_api__v1__media__`。`instagram.load_embedded_json`）から起点投稿（投稿者）と初回コメントを取り、`InstagramCapture`に`inject`してから、コメント欄の内部スクロールコンテナを送る`COMMENT_SCROLL_SCRIPT`で`scroll_and_collect`する（追加分は`/api/graphql`の`PolarisPostCommentsPaginationQuery`）。Web版に並び替えUIは無いので既定（popular）のまま。`instagram.parse_instagram_comments`がコメントノード（`pk`+`created_at`+`comment_like_count`）を`Post`化：`url`=`/p/<code>/c/<pk>/`、`like_count`=`comment_like_count`、`reply_count`=`child_comment_count`、トップレベル（`parent_comment_id`がnull）は`in_reply_to_id`=起点のmedia pk（コメントノードに無いため補う）、子コメントは`parent_comment_id`。子コメントを展開する追加リクエストはしない。`source_query`=`ig-related:<code>:comment`、`data/raw/ig_related_<日付>_<連番>.jsonl`。shortcode⇔pk変換は`instagram.shortcode_to_pk`/`pk_to_shortcode`（64進数）。
 - **`th_related.py`（Threads）**：投稿ページを`?sort_order=top`で開き、`ensure_reply_sort_top`で並び替えボタン（`[role=button][aria-haspopup=menu]`のテキスト「トップ/最近」）を確認、「トップ」でなければメニューのリンク（`a[role=menuitem]`）で選び直す（ページ遷移する）。返信は埋め込みJSON＋スクロール時の`BarcelonaPostPageDirectRepliesRefetchQuery`。`threads.parse_threads_replies`は`is_reply`の投稿だけを返し、`reply_level == 1`かつ`reply_to_author`が起点投稿者なら`in_reply_to_id`=起点pk（ペイロードに親IDが無いため補う）、それ以外は`None`。`target_handle`は渡さない（返信が`is_repost`扱いになるため）。引用は「アクティビティを見る」→ダイアログ内の「引用」タブ（文言は件数込み「引用\n1」。「フォローする」ボタン等を押さないよう文言で限定）→`BarcelonaFeedbackHubTabQuery`（ダイアログを開いた時の`post_activity`の`icon_name=quote`も拾う）を`threads.parse_feedback_quote_items`で`ThreadsQuoteRef`（`destination`の`id=<pk>_…&shortcode=<code>`と`actor.username`。shortcodeが無ければpkから変換）にし、引用投稿を1件ずつ開いて（逐次・各アクセス前に`wait_seconds`範囲のランダム待機・`--max`件まで）`find_threads_post`で`Post`化する。「アクティビティを見る」が無ければ警告して引用はスキップ。操作後は必ず`raise_if_blocked`でブロック検知する。`source_query`=`th-related:<code>:reply|quote`、`data/raw/th_related_<日付>_<連番>.jsonl`。
 - **TikTokは未対応（2026-10-09見送り）**：CDP接続のChromeで動画ページ（`/@<user>/video/<id>`）を自動操作の新規タブから開くと本文なしのHTTP 403で弾かれた（同じChrome・同じURLを通常起動で開くと正常表示）。そのためコメントAPIの構造は未採取。再開する場合は「既存タブに接続して通信だけ見る」方式の検討から。
+
+### `scripts/gui.py` / `gui_api.py` / `gui_support.py` / `webui/`（非エンジニア向けGUI）
+
+画面は`scripts/webui/`（`index.html`/`app.css`/`app.js`。外部CDNは使わずオフラインで完結）、ウィンドウは`pywebview`（WindowsはEdge WebView2）。`gui.py`は起動だけ（pywebviewが無ければメッセージを出して終了、ファイルダイアログを`WebviewDialogs`で`gui_api`に渡す、閉じるときに実行中のスクリプトを止める）。収集ロジックは持たず、既存スクリプトを`subprocess`で1本ずつ呼ぶだけ（実行中は次を受け付けない＝同時収集しない）。デザインは「案A ミント」（左メニュー＋カード、ライト/ダーク両対応）。
+- `gui_api.py`の`Api`がjs_api。画面からの呼び出しは全て`{"ok": bool, ...}`を返し例外を投げない。`run(task, params)`→`poll(since)`で出力行を差分取得し、`保存先:`/`上位Markdown:`/`出力:`の行から出力パスを拾い、終了コードを日本語の案内（`SHORT_STATUS`と`gui_support.exit_message`）にする。pywebviewは公開属性を画面に出すので、内部状態は全て`_`付きにする。テストは`tests/test_gui_api.py`（Popen・ダイアログ・オープナーを差し替え）。
+- `gui_support.py`はpywebview・Playwright非依存の純関数（引数組み立て`build_*`、`exit_message`、JSONL→Excel用CSV（UTF-8 BOM付き）`write_csv`、`config.yaml`のコメントを残したままの書き換え`set_config_value`/`set_watch_accounts`/`set_interest_keywords`/`set_cdp_urls`、ログイン状況`login_status`、ログイン用Chromeの探索と起動コマンド）。テストは`tests/test_gui_support.py`。
+- 「ログイン用Chromeを開く」は`chrome-profile/`（.gitignore済み）を専用プロファイルにして`--remote-debugging-port=9222`で起動し、CDP設定が無ければ有効にする。X・TikTokはこのChromeにCDP接続して収集する（設定画面の切替は`session.cdp_url`と`tiktok.cdp_url`を同時に変える）。ログイン状況はCDP方式ならChromeの起動有無（`/json/version`）、それ以外はstorage_stateファイルの有無で表示する。自動ログインはしない。
+- 設定画面の保存は`config.yaml`を行単位で書き換え（前の内容を`config.yaml.bak`に退避、YAMLとして読めない結果は書かない）。
+- `setup.bat`（venv作成・pip・`playwright install chromium`）と`start_gui.bat`（`pythonw`で起動）はUTF-8＋CRLF（`.gitattributes`で固定）。
 
 ### `pick.py`（収集系と非依存）
 

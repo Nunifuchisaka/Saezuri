@@ -12,3 +12,5 @@ state/
 digest/
 data/media/
 *.log
+config.yaml.bak
+chrome-profile/

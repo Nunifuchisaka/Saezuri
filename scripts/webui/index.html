@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>saezuri</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<aside class="side">
+  <div class="logo"><span class="logo-mark">さ</span><span>saezuri</span></div>
+  <nav>
+    <button class="nav" data-page="setup"><span class="ico">🔑</span>準備（ログイン）</button>
+    <button class="nav" data-page="search"><span class="ico">🔍</span>Xを検索</button>
+    <button class="nav" data-page="account"><span class="ico">👤</span>アカウントを追う</button>
+    <button class="nav" data-page="fx"><span class="ico">⚡</span>投稿の数字を取る</button>
+    <button class="nav" data-page="related"><span class="ico">🏆</span>反応ランキング</button>
+    <button class="nav" data-page="report"><span class="ico">📊</span>まとめ・Excel</button>
+    <button class="nav" data-page="settings"><span class="ico">⚙</span>設定</button>
+  </nav>
+  <div class="grow"></div>
+  <div class="login-box" id="login-box" title="クリックで更新"></div>
+</aside>
+
+<main>
+  <!-- 準備 -->
+  <section class="page" id="page-setup">
+    <header><h1>準備（ログイン）</h1><p class="sub">収集専用のサブアカウントでログインします。最初の1回と、ログインが切れたときだけです。</p></header>
+    <div class="notice">会社の公式アカウントや個人の本アカウントではログインしないでください（凍結されると困るため）。</div>
+    <div class="card">
+      <h2>X・TikTok<span class="chip">おすすめ</span></h2>
+      <ol class="steps">
+        <li>「ログイン用Chromeを開く」を押すと、saezuri専用のChromeが開きます（いつものChromeとは別物です）</li>
+        <li>開いたChromeで、XとTikTokにサブアカウントでログインします</li>
+        <li>収集するときは、このChromeを開いたままにしておきます</li>
+      </ol>
+      <div class="actions"><button class="btn primary" id="btn-chrome">ログイン用Chromeを開く</button></div>
+    </div>
+    <div class="card">
+      <h2>Instagram・Threads</h2>
+      <p class="muted">ボタンを押すとブラウザが開きます。5分以内にサブアカウントでログインすると、自動で保存されて閉じます。</p>
+      <div class="actions">
+        <button class="btn" data-login="instagram">Instagramにログイン</button>
+        <button class="btn" data-login="threads">Threadsにログイン</button>
+      </div>
+    </div>
+    <details class="card fold">
+      <summary>ログイン用Chromeを使わない方法（上級者向け）</summary>
+      <p class="muted">「設定」で「ログイン用Chromeを使う」を外した場合だけ使います。Googleアカウントでのログインは弾かれることがあります。</p>
+      <div class="actions">
+        <button class="btn" data-login="x">Xにログイン（専用ブラウザ）</button>
+        <button class="btn" data-login="tiktok">TikTokにログイン（専用ブラウザ）</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- Xを検索 -->
+  <section class="page" id="page-search">
+    <header><h1>Xを検索</h1><p class="sub">キーワードや投稿者で、Xの投稿を集めます</p></header>
+    <form class="card" data-task="search">
+      <div class="grid2">
+        <label>キーワード<input name="query" placeholder="例: 新作 リップ（スペース区切りで両方を含む）"></label>
+        <label>投稿者（任意）<input name="from" placeholder="@なしで入力"></label>
+        <label>期間（任意）
+          <span class="range"><input name="since" type="date"><span class="arrow">→</span><input name="until" type="date"></span>
+          <small>終了日は含みません</small>
+        </label>
+        <label>最大件数<input name="max" inputmode="numeric" placeholder="空欄なら設定の値（既定100件）"></label>
+      </div>
+      <div class="actions between">
+        <div class="seg" data-name="mode"><button type="button" data-value="live" class="on">新しい順</button><button type="button" data-value="top">話題の投稿</button></div>
+        <button class="btn primary" type="submit">検索して集める</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- アカウント -->
+  <section class="page" id="page-account">
+    <header><h1>アカウントを追う</h1><p class="sub">特定のアカウントの新しい投稿や、フォロワー数を集めます</p></header>
+    <form class="card" data-task="account">
+      <div class="field"><span class="label">SNS</span>
+        <div class="seg" data-name="sns"><button type="button" data-value="x" class="on">X</button><button type="button" data-value="instagram">Instagram</button><button type="button" data-value="threads">Threads</button><button type="button" data-value="tiktok">TikTok</button></div>
+      </div>
+      <div class="field"><span class="label">集めるもの</span>
+        <div class="seg" data-name="kind"><button type="button" data-value="posts" class="on">新しい投稿</button><button type="button" data-value="profiles">フォロワー数など</button></div>
+        <small id="kind-note"></small>
+      </div>
+      <div class="grid2">
+        <label>アカウント名（任意）<input name="account" placeholder="空欄なら「設定」の全アカウント。URLを貼ってもOK"></label>
+        <label>最大件数（投稿のみ）<input name="max" inputmode="numeric" placeholder="空欄なら設定の値"></label>
+      </div>
+      <p class="muted">「新しい投稿」は、前回集めた分より新しいものだけを保存します。</p>
+      <div class="actions end"><button class="btn primary" type="submit">集める</button></div>
+    </form>
+  </section>
+
+  <!-- 投稿の数字（FxTwitter） -->
+  <section class="page" id="page-fx">
+    <header><h1>投稿の数字を取る<span class="chip">ログイン不要</span></h1><p class="sub">Xの投稿URLから、本文・いいね・リポスト・返信・引用・表示回数・画像を取得します</p></header>
+    <form class="card" data-task="fx">
+      <label>投稿のURL（1行に1つ、最大50件）<textarea name="urls" rows="7" placeholder="https://x.com/…/status/…"></textarea></label>
+      <p class="muted">Xにはログインせず、外部の無料サービス「FxTwitter」（オープンソース）経由で取得します。送るのは投稿のIDだけです。<br>非公式のサービスなので、止まっていたり、数字が少し古かったりすることがあります。検索や返信の一覧は取れません。</p>
+      <div class="actions end"><button class="btn primary" type="submit">取得する</button></div>
+    </form>
+  </section>
+
+  <!-- 反応ランキング -->
+  <section class="page" id="page-related">
+    <header><h1>反応ランキング</h1><p class="sub">1つの投稿に付いた返信・引用・コメントを、いいねの多い順に並べます（X・Instagram・Threads）</p></header>
+    <form class="card" data-task="related">
+      <label>投稿のURL<input name="url" placeholder="https://x.com/…/status/…"></label>
+      <div class="grid2">
+        <label>上位何件<input name="top" inputmode="numeric" placeholder="10"></label>
+        <label>最大収集件数（任意）<input name="max" inputmode="numeric" placeholder="指定なし"></label>
+      </div>
+      <div class="actions end"><button class="btn primary" type="submit">集めてランキングを作る</button></div>
+    </form>
+  </section>
+
+  <!-- まとめ・Excel -->
+  <section class="page" id="page-report">
+    <header><h1>まとめ・Excel</h1><p class="sub">集めたデータを、Excelやまとめ、画像にします。直前に集めたデータは自動で選ばれます。</p></header>
+    <div class="card">
+      <div class="files"><div id="file-list" class="file-list empty">まだ選ばれていません</div><button class="btn" id="btn-choose">ファイルを選ぶ…</button></div>
+      <label>まとめのタイトル（任意）<input id="digest-title" placeholder="例: 11月第3週 新作リップの反応"></label>
+      <div class="actions">
+        <button class="btn primary" id="btn-csv">Excelで開く（CSV）</button>
+        <button class="btn" id="btn-digest">まとめを作る（Markdown）</button>
+        <button class="btn" id="btn-media">画像を保存する</button>
+      </div>
+      <p class="muted">集めた投稿には他人の著作物や個人情報が含まれます。社内での分析にとどめ、そのまま社外へ転載・再配布しないでください。</p>
+    </div>
+    <div class="card row-links">
+      <span class="muted">フォルダを開く</span>
+      <button class="link" data-folder="raw">収集データ</button>
+      <button class="link" data-folder="digest">まとめ</button>
+      <button class="link" data-folder="media">画像</button>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section class="page" id="page-settings">
+    <header><h1>設定</h1><p class="sub">「アカウントを追う」でアカウント名を空欄にしたときに処理するアカウントなど</p></header>
+    <form class="card" id="settings-form">
+      <span class="label">追跡するアカウント（1行に1つ、@なし）</span>
+      <div class="grid4">
+        <label>X<textarea name="acc-x" rows="6"></textarea></label>
+        <label>Instagram<textarea name="acc-instagram" rows="6"></textarea></label>
+        <label>Threads<textarea name="acc-threads" rows="6"></textarea></label>
+        <label>TikTok<textarea name="acc-tiktok" rows="6"></textarea></label>
+      </div>
+      <div class="grid2">
+        <label>関心キーワード（Xのトレンド絞り込み用、1行に1つ）<textarea name="keywords" rows="4"></textarea></label>
+        <div>
+          <label class="check"><input type="checkbox" name="use_cdp"> X・TikTokの収集に「ログイン用Chrome」を使う（おすすめ）</label>
+          <label>Instagram・Threads等で使うブラウザ<select name="browser"></select></label>
+        </div>
+      </div>
+      <div class="actions between">
+        <span class="muted">保存すると config.yaml が書き換わります（前の内容は config.yaml.bak に残ります）</span>
+        <span><button class="btn" type="button" id="btn-reload">元に戻す</button> <button class="btn primary" type="submit">保存</button></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- 実行状況（全ページ共通） -->
+  <div class="card status" id="status">
+    <div class="status-head">
+      <h2>実行状況<span class="chip" id="status-chip">待機中</span></h2>
+      <button class="btn small ghost" id="btn-stop" hidden>中止</button>
+    </div>
+    <div class="prog" id="prog"><div></div></div>
+    <div class="log" id="log"><div class="hint">ここに進み具合が表示されます。</div></div>
+    <div class="result" id="result" hidden></div>
+  </div>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
