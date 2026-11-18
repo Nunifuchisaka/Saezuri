@@ -17,6 +17,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # ログに日本語を出すため（ランナーの既定はcp1252）
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
   windows:
     runs-on: windows-latest
