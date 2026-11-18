@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 # 設定（監視アカウント等を含む。config.example.yaml をコピーして作る）
 config.yaml
+# 用途別に作った設定（config.<名前>.yaml）も同じ理由で追跡しない
+config.*.yaml
+!config.example.yaml
 # ログイン結果（Cookie）
 session/
 *storage_state*.json
