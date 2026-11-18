@@ -1,0 +1,76 @@
+# Windowsの新しい環境での動作確認（SNS担当者のPCと同じく、ZIPを展開して setup.bat から始める想定）
+# - setup.bat をそのまま実行してセットアップできるか（3.15と3.14が入っているときに3.14を選ぶか）
+# - 単体テスト（pytest）
+# - GUIを実際に開いてJS⇔Pythonがつながるか・各画面のスクリーンショット、GUI経由のスクリプト実行、
+#   CSVの書き出し、ログイン用Chromeの起動とCDP接続（.github/scripts/windows_smoke.py。SNSにはログインせず収集もしない）
+# - start_gui.bat で画面のプロセスが起動したままになるか
+# スクリーンショットは Actions の実行結果の Artifacts（windows-smoke）から見られる。
+
+name: Windows check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          # 最新の3.15（部品が未対応）と3.14を入れて、setup.bat が3.14を選ぶことを確かめる
+          python-version: |
+            3.14
+            3.15
+
+      - name: 画面の解像度を上げる（スクリーンショット用）
+        continue-on-error: true
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+
+      - name: 入っているPython
+        shell: cmd
+        run: py -0p
+
+      - name: setup.bat でセットアップ
+        shell: cmd
+        run: call setup.bat < NUL
+
+      - name: 選ばれたPythonの版
+        shell: cmd
+        run: .venv\Scripts\python.exe -c "import sys; print(sys.version); assert sys.version_info[:2] <= (3, 14)"
+
+      - name: 単体テスト
+        shell: cmd
+        run: .venv\Scripts\python.exe -m pytest -q tests
+
+      - name: GUI・スクリプト実行・ログイン用Chromeの確認
+        shell: cmd
+        run: .venv\Scripts\python.exe .github\scripts\windows_smoke.py smoke-out
+
+      - name: start_gui.bat で画面が起動したままになるか
+        shell: pwsh
+        run: |
+          cmd /c "start_gui.bat < NUL"
+          Start-Sleep -Seconds 15
+          $p = Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -like '*gui.py*' }
+          if ($p) {
+            Write-Output "画面のプロセスが動いています"
+            $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+          } else {
+            Write-Output "画面のプロセスが起動していません"; exit 1
+          }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: windows-smoke
+          path: smoke-out/
+          if-no-files-found: ignore
